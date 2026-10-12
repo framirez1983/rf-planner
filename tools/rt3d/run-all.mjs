@@ -37,6 +37,8 @@ const steps = [
   // It pins the counterexample that blocks reflection pruning, so a future
   // attempt cannot silently rediscover the bound as if it were sound.
   ['Stage 7B.1 reflection-pruning feasibility (shadow measurement + counterexample)', 'stage7b1-prune-feasibility.test.mjs', []],
+  ['Stage 7B.2a shadow-pruning measurement transport (Worker boundary)', 'stage7b2a-shadow-transport.test.mjs', []],
+  ['Stage 7B.2a UI regression (experimental panel + file input)', 'stage7b2a-ui-regression.test.mjs', []],
   // RF CORRECTNESS, not performance. Establishes that a passive material can
   // never contribute negative attenuation, which is the precondition Stage 7B.1
   // found missing and which blocks any reflection-pruning bound.

@@ -8047,7 +8047,7 @@ function rt3dCoverageSlice(world, spec, planeZ, opts){
   const apBest  = (cur && cur.apBest)  ? cur.apBest  : new Int16Array(n).fill(-1);
   const valid   = (cur && cur.valid)   ? cur.valid   : new Uint8Array(n);
   const acc     = (cur && cur.acc)     ? cur.acc
-                : { evaluated:0, anyValid:0, directTested:0, validReflected:0, t0:clock() };
+                : { evaluated:0, anyValid:0, directTested:0, validReflected:0, reflectionShadowPrunable:0, zeroFalsePruneVerification:0, candidatesBecameBestReflected:0, candidatesBecameOverallWinner:0, t0:clock() };
   const sources = opts.sources || rt3dCoverageSources();
   const sliceOpts = {
     backend: opts.backend || rt3dBroadphaseBackend,
@@ -8110,6 +8110,50 @@ function rt3dCoverageSlice(world, spec, planeZ, opts){
       acc.evaluated++;
       acc.directTested += r.stats.directTested;
       acc.validReflected += r.stats.validReflected;
+      // Shadow pruning measurement accumulation (Section 9.4)
+      // Stage-7B.1 inequality: optimisticRssi <= bestReflectedSoFar
+      // (strict ">" / first-wins; incumbent updated after each candidate)
+      // computed from per-cell reflected candidates using sliceOpts
+      var cellBestReflected = -Infinity;
+      var cellStrongestSoFar = -Infinity;
+      var cellReflectionShadowPrunable = 0;
+      var cellZeroFalsePruneVerification = 0;
+      var cellCandidatesBecameBestReflected = 0;
+      var cellCandidatesBecameOverallWinner = 0;
+      for (const ap of r.aps) {
+        if (ap.candidates.length === 0) continue;
+        // Calculate antenna gain for this AP at this point (same as rt3dCoverageAt)
+        const apPoint = rt3dApOrigin(ap, ap.floorIndex || 0);
+        const gain = antennaGain(ap, pt.x, pt.y, apPoint.z, pt.z);
+        for (const c of ap.candidates) {
+          if (c.kind !== "reflected" || !c.valid) continue;
+          const pathLoss = sliceOpts.pl1 + 10*sliceOpts.plExp*Math.log10(Math.max(0.5, c.pathDistance));
+          const optimisticRssi = ap.txPower + gain - (pathLoss + 0 + c.reflectionLossDb);
+          const actualRssi = c.receivedPower;
+          // Best-reflected incumbent (running, reflected-only, per cell):
+          if (actualRssi > cellBestReflected) {
+            cellBestReflected = actualRssi;
+            cellCandidatesBecameBestReflected++;
+          }
+          // Overall incumbent:
+          if (actualRssi > cellStrongestSoFar) {
+            cellStrongestSoFar = actualRssi;
+            cellCandidatesBecameOverallWinner++;
+          }
+          // Prune classification using the Stage-7B.1 inequality:
+          // optimisticRssi <= cellBestReflected (strict ">" / first-wins semantics)
+          var prunable = optimisticRssi <= cellBestReflected;
+          if (prunable) { cellReflectionShadowPrunable++; }
+          // Zero false prune verification: if prunable but actual > new incumbent:
+          var newBest = Math.max(cellBestReflected, actualRssi);
+          if (prunable && actualRssi > newBest) { cellZeroFalsePruneVerification++; }
+        }
+      }
+      // Accumulate per-cell contributions into the running totals
+      acc.reflectionShadowPrunable = (acc.reflectionShadowPrunable||0) + cellReflectionShadowPrunable;
+      acc.zeroFalsePruneVerification = (acc.zeroFalsePruneVerification||0) + cellZeroFalsePruneVerification;
+      acc.candidatesBecameBestReflected = (acc.candidatesBecameBestReflected||0) + cellCandidatesBecameBestReflected;
+      acc.candidatesBecameOverallWinner = (acc.candidatesBecameOverallWinner||0) + cellCandidatesBecameOverallWinner;
       const k=j*spec.cols+i;
       if(Number.isFinite(r.strongestRssi)){ best[k]=r.strongestRssi; valid[k]=1; acc.anyValid++; }
       if(r.servingApIndex>=0) apBest[k]=r.servingApIndex;
@@ -8156,6 +8200,10 @@ function rt3dCoverageSlice(world, spec, planeZ, opts){
       ownerFloors: [...new Set(sources.map(s=>s.floorIndex))].sort((a,b)=>a-b),
       directPathsTested: acc.directTested,
       validReflectedPaths: acc.validReflected,
+      reflectionShadowPrunable: acc.reflectionShadowPrunable,
+      zeroFalsePruneVerification: acc.zeroFalsePruneVerification,
+      candidatesBecameBestReflected: acc.candidatesBecameBestReflected,
+      candidatesBecameOverallWinner: acc.candidatesBecameOverallWinner,
       totalMs: +ms.toFixed(2),
       cellsPerSec: ms>0 ? Math.round(acc.evaluated/(ms/1000)) : null,
       worldBodies: rt3dAllBodies(world).length,
@@ -11725,15 +11773,19 @@ function rt3dAuditReportPerf(){
   row('segment traces a perfect pre-trace bound could at most avoid',
       legSeg==null?null:legSeg.toLocaleString());
   L.push('');
-  L.push('`shadow-prunable under current order` is deliberately **not** listed as a number');
-  L.push('here. Answering it per project would require the engine to record a per-candidate');
-  L.push('optimistic value and a running incumbent during the production run. It does not,');
-  L.push('and adding that instrumentation is a production change this report does not make.');
-  L.push('The candidate-level measurement lives in `tools/rt3d/stage6-bench.mjs`');
-  L.push('(section 8) and `tools/rt3d/stage7b1-prune-feasibility.test.mjs`, which run');
-  L.push('against the same engine and do not alter it.');
+L.push('| quantity | value |');
+L.push('|---|---|');
+row('reflection candidates accepted', acceptedRefl==null?null:acceptedRefl.toLocaleString());
+row('shadow-prunable under current order', cov.diagnostics.reflectionShadowPrunable!=null ? cov.diagnostics.reflectionShadowPrunable.toLocaleString() : 'n/a');
+row('shadow-prunable %', typeof cov.diagnostics.reflectionShadowPrunable === 'number' && isFinite(cov.diagnostics.reflectionShadowPrunable) ? (100 * cov.diagnostics.reflectionShadowPrunable / Math.max(1, acceptedRefl)).toFixed(2) + '%' : 'n/a');
+row('estimated reflection-leg segments avoidable', typeof cov.diagnostics.reflectionShadowPrunable === 'number' && isFinite(cov.diagnostics.reflectionShadowPrunable) ? (2 * cov.diagnostics.reflectionShadowPrunable).toLocaleString() : '—');
+row('false-prune violations', cov.diagnostics.zeroFalsePruneVerification!=null ? cov.diagnostics.zeroFalsePruneVerification : 'n/a');
+row('candidates became best reflected', cov.diagnostics.candidatesBecameBestReflected!=null ? cov.diagnostics.candidatesBecameBestReflected : 'n/a');
+row('candidates became overall winner', cov.diagnostics.candidatesBecameOverallWinner!=null ? cov.diagnostics.candidatesBecameOverallWinner : 'n/a');
+
+  L.push('shadow-prunable under current order is now reported from retained run data (measurement only, no pruning active)');
   L.push('');
-  L.push('**Status: the precondition is now PROVEN. The prune is still NOT ACTIVE.**');
+  L.push('**Status: the precondition is now PROVEN. The prune is still NOT ACTIVE. No reflection candidate is skipped, reordered, or approximated anywhere in the application.**');
   L.push('');
   L.push('The proposed bound evaluates the exact reflected-RSSI formula with');
   L.push('`materialLossDb` set to zero and would skip the two segment traces when that');

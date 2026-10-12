@@ -376,6 +376,10 @@
                   worldBodies: d.worldBodies,
                   bvhNodes: bvh && bvh.nodeCount != null ? bvh.nodeCount : 0,
                   bvhCandidatesTested: d.bvhCandidatesTested,
+                  reflectionShadowPrunable: d.reflectionShadowPrunable,
+                  zeroFalsePruneVerification: d.zeroFalsePruneVerification,
+                  candidatesBecameBestReflected: d.candidatesBecameBestReflected,
+                  candidatesBecameOverallWinner: d.candidatesBecameOverallWinner,
                   // Stage 7A.2 measurement pass: the BVH traversal counters the
                   // engine already maintains, forwarded so the browser report can
                   // show the same categories as the offline profiler. These are
