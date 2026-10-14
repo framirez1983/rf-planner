@@ -298,6 +298,7 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20"/><path d="M12 6v6l4 2"/></svg>
       <span data-i18n="toolbar.simulateCoverage">Simular cobertura</span>
     </button>
+    <span id="simStatus" class="tbtn" style="font-size:10px;padding:2px 8px;opacity:0.7"></span>
     <button class="tbtn" id="btnTrace">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/><circle cx="12" cy="12" r="3"/></svg>
       Ray tracing
@@ -821,6 +822,10 @@ const translations = {
     "rt3d.cov.antenna": "ganancia de antena",
     "rt3d.cov.antennaNote": "RT3D Coverage Field usa antennaGain(): azimut + anchura de haz en elevación + inclinación. Esto DIVERGE de la Ray Tracing clásica (solo azimut), de forma intencionada y documentada.",
     "rt3d.cov.refl": "reflexión",
+    "rt3d.sim.current": "Cobertura actualizada",
+    "rt3d.sim.stale": "Cobertura desactualizada",
+    "rt3d.sim.currentTooltip": "La simulación refleja el estado actual del proyecto",
+    "rt3d.sim.staleTooltip": "El diseño cambió desde la última simulación",
     "rt3d.audit.export": "Exportar informe Stage 6.5",
     "rt3d.audit.copy": "Copiar informe",
     "rt3d.audit.download": "Descargar .md",
@@ -1257,6 +1262,10 @@ const translations = {
     "rt3d.cov.antenna": "antenna gain",
     "rt3d.cov.antennaNote": "RT3D Coverage Field uses antennaGain(): azimuth + elevation beamwidth + downtilt. This DIVERGES from legacy Ray Tracing (azimuth only), intentionally and documented.",
     "rt3d.cov.refl": "reflection",
+    "rt3d.sim.current": "Coverage up to date",
+    "rt3d.sim.stale": "Coverage out of date",
+    "rt3d.sim.currentTooltip": "The simulation reflects the current state of the project",
+    "rt3d.sim.staleTooltip": "The design changed since the last simulation",
     "rt3d.audit.export": "Export Stage 6.5 report",
     "rt3d.audit.copy": "Copy report",
     "rt3d.audit.download": "Download .md",
@@ -1693,6 +1702,10 @@ const translations = {
     "rt3d.cov.antenna": "antennvinst",
     "rt3d.cov.antennaNote": "RT3D Coverage Field använder antennaGain(): azimut + elevationsstrålbredd + nedtilt. Detta AVVIKER från legacy Ray Tracing (endast azimut), avsiktligt och dokumenterat.",
     "rt3d.cov.refl": "reflektion",
+    "rt3d.sim.current": "Täckning uppdaterad",
+    "rt3d.sim.stale": "Täckning föråldrad",
+    "rt3d.sim.currentTooltip": "Simuleringen speglar projektets nuvarande tillstånd",
+    "rt3d.sim.staleTooltip": "Designen har ändrats sedan senaste simulering",
     "rt3d.audit.export": "Exportera Stage 6.5-rapport",
     "rt3d.audit.copy": "Kopiera rapport",
     "rt3d.audit.download": "Ladda ner .md",
@@ -2045,6 +2058,44 @@ function geometryChanged(){
   if(fpNote){ fpNote.style.display='none'; fpNote.textContent=''; }
   _indoor=null; scheduleHeat(); refreshStats(); draw2d(); if(view==='3d')build3d();
 }
+
+// Canonical RF revision incrementor.
+// Call this whenever an RF-relevant project mutation occurs.
+// Does not recompute anything; simply increments the revision counter so that
+// any previously completed simulation can be classified as STALE.
+// Ephemeral runtime-only state: never serialized into project JSON, never in
+// undo history. rt3dNormalMeta (also runtime-only) holds the revision of the
+// last completed simulation for CURRENT/STALE comparison.
+let rfRevision = 0;
+let simulationRevision = null;
+function markRfChanged(){
+  rfRevision = (rfRevision||0) + 1;
+  updateSimStatus();
+}
+
+// Update simulation freshness status indicator.
+// Shows "Cobertura actualizada"/"Coverage up to date"/"Täckning uppdaterad" (green)
+// or "Cobertura desactualizada"/"Coverage out of date"/"Täckning föråldrad" (amber).
+function updateSimStatus(){
+  const el = $('#simStatus');
+  if(!el) return;
+  if(!rt3dNormalActive || !rt3dNormalCanvas){
+    el.textContent = ''; el.style.display = 'none'; return;
+  }
+  const simRev = rt3dNormalMeta?.simulationRevision ?? rt3dNormalMeta?.simulationStartRevision;
+  if(simRev === undefined || simRev === null){
+    el.textContent = ''; el.style.display = 'none'; return;
+  }
+  const isCurrent = (rfRevision === simRev);
+  el.textContent = isCurrent ? t('rt3d.sim.current') : t('rt3d.sim.stale');
+  el.title = isCurrent ? t('rt3d.sim.currentTooltip') : t('rt3d.sim.staleTooltip');
+  el.style.display = 'inline-block';
+  el.style.color = isCurrent ? '#34d6c4' : '#f4a83a';
+  el.style.background = isCurrent ? 'rgba(52,214,196,0.1)' : 'rgba(244,168,58,0.1)';
+  el.style.border = isCurrent ? '1px solid #34d6c4' : '1px solid #f4a83a';
+  el.style.borderRadius = '3px';
+}
+
 loadWallSnapPrefs();
 loadEditorPrefs();
 
@@ -2079,7 +2130,7 @@ function freshState(){
     activeFloor:0, activeMat:mats[4].id,
     covThreshold:-67, showFail:false, heatView:'rssi', noiseFloor:-95, indoorOnly:true,
     originX:0, originY:0, northAngle:0,
-    floors:[ freshFloor('Ground floor',0) ],
+    floors:[ freshFloor('Ground floor',0) ]
   };
   return s;
 }
@@ -3448,7 +3499,7 @@ function finishOpeningDraft(){
   const f=floor(); if(!f.openings)f.openings=[];
   commit();
   const op={id:uid('opn'),name:'Open space',points:openingDraft.map(p=>({x:p.x,y:p.y}))};
-  f.openings.push(op); openingDraft=null; select('opening',op.id); scheduleHeat(); return true;
+  f.openings.push(op); openingDraft=null; select('opening',op.id); markRfChanged(); scheduleHeat(); return true;
 }
 uiElListen(cv,'contextmenu',e=>e.preventDefault());
 uiElListen(cv,'pointerdown',e=>{
@@ -3513,7 +3564,7 @@ uiElListen(cv,'pointerdown',e=>{
       return;
     }
     const ap=pickAP(w.x,w.y);
-    if(ap){ select('ap',ap.id); commit(); dragging={type:'ap',id:ap.id,ox:w.x-ap.x,oy:w.y-ap.y}; return; }
+    if(ap){ select('ap',ap.id); commit(); dragging={type:'ap',id:ap.id,ox:w.x-ap.x,oy:w.y-ap.y,sx:ap.x,sy:ap.y}; return; }
     const rk=pickRack(w.x,w.y);
     if(rk){ select('rack',rk.id); commit(); dragging={type:'rack',id:rk.id,ox:w.x-rk.x,oy:w.y-rk.y}; return; }
     const lb=pickLabel(w.x,w.y);
@@ -3571,13 +3622,13 @@ uiElListen(cv,'pointerdown',e=>{
   else if(tool==='ap'){
     const f=floor();
     const ap=makeAP(Math.round(w.x*4)/4, Math.round(w.y*4)/4, 'AP-'+(f.aps.length+1), f.height);
-    commit(); f.aps.push(ap); select('ap',ap.id); scheduleHeat(); refreshStats();
+    commit(); markRfChanged(); f.aps.push(ap); select('ap',ap.id); scheduleHeat(); refreshStats();
   }
   else if(tool==='pillar'){
     const f=floor();
     if(!f.pillars)f.pillars=[];
     const pl={id:uid('plr'),x:Math.round(w.x*4)/4,y:Math.round(w.y*4)/4,diameter:0.6,materialId:state.activeMat};
-    commit(); f.pillars.push(pl); select('pillar',pl.id); scheduleHeat(); refreshStats(); if(view==='3d')build3d();
+    commit(); markRfChanged(); f.pillars.push(pl); select('pillar',pl.id); scheduleHeat(); refreshStats(); if(view==='3d')build3d();
   }
   else if(tool==='label'){
     const f=floor();
@@ -3595,7 +3646,7 @@ uiElListen(cv,'pointerdown',e=>{
     const f=floor();
     if(!f.rfObjects)f.rfObjects=[];
     const ro={id:uid('rfobj'),name:'RF-Objekt '+(f.rfObjects.length+1),x:Math.round(w.x*4)/4,y:Math.round(w.y*4)/4,width:1,depth:1,height:1,rotation:0,materialId:state.activeMat,extraLossDb:0};
-    commit(); f.rfObjects.push(ro); select('rfobj',ro.id); if(view==='3d')build3d(); refreshStats(); scheduleHeat();
+    commit(); markRfChanged(); f.rfObjects.push(ro); select('rfobj',ro.id); if(view==='3d')build3d(); refreshStats(); scheduleHeat();
   }
   else if(tool==='cable'){
     const f=floor();
@@ -3624,7 +3675,7 @@ uiElListen(cv,'pointerdown',e=>{
     }
     else{
       const s=snapWallPoint(w.x,w.y,{fixed:{x:draft.x1,y:draft.y1},altKey:e.altKey});
-      commit();
+      commit(); markRfChanged();
       floor().walls.push({id:uid('wl'),x1:draft.x1,y1:draft.y1,x2:s.x,y2:s.y,
         materialId:state.activeMat, thickness:DEFAULT_WALL_THICKNESS_M});
       draft={x1:s.x,y1:s.y,x2:s.x,y2:s.y}; // chain
@@ -3748,7 +3799,16 @@ uiWindowListen('pointerup',e=>{
   if(dragging){
     const draggedType=dragging.type;
     const needsGeometryUpdate=(dragging.type==='wall-endpoint'||dragging.type==='wall-body') && dragging.moved;
+    // One RF revision increment per completed AP drag gesture that actually
+    // moved: the pointermove path already refreshed the quick preview, and the
+    // retained authoritative result stays on screen until a rerun.
+    const dragRef=dragging;
     dragging=null;
+    if(dragRef.type==='ap'){
+      let movedAp=null;
+      for(const flr of state.floors){ const cand=(flr.aps||[]).find(a=>a.id===dragRef.id); if(cand){ movedAp=cand; break; } }
+      if(movedAp && (movedAp.x!==dragRef.sx || movedAp.y!==dragRef.sy)) markRfChanged();
+    }
     if(needsGeometryUpdate){ geometryChanged(); renderProp(); }
     else { refreshStats(); renderProp(); if((draggedType==='pillar'||draggedType==='ap')&&view==='3d')build3d(); }
   }
@@ -3841,7 +3901,7 @@ function nudgeSelection(dx,dy){
     coverageOnly=true; moved=true;
   }
   if(!moved) return false;
-  if(rf) scheduleHeat();
+  if(rf){ markRfChanged(); scheduleHeat(); }
   else if(coverageOnly){ coverageUpdate(); refreshStats(); }
   draw2d(); renderProp(); if(threeD&&view==='3d')build3d();
   return true;
@@ -8643,7 +8703,7 @@ function rt3dExpRunCoverage(){
   // / Ceiling / Opening model is introduced -- the worker calls the same
   // rt3dBuildWorld() and rt3dCoverageSources() this thread does.
   const snapshot = {
-    state: JSON.parse(JSON.stringify(state, (k,v)=> k==='_img' ? undefined : v)),
+    state: JSON.parse(JSON.stringify(state, (k,v)=> (k==='_img'||k==='rfRevision'||k==='simulationRevision'||k==='simulationStartRevision'||k==='isCurrent') ? undefined : v)),
     floorIndex: floorIndex,
     spec: spec,
     planeZ: planeZ,
@@ -8782,18 +8842,20 @@ function rt3dExpRunCoverage(){
       ui.cancelled=true;
       ui.finished=true;
       rt3dExpWorkerCancel(jobId);
-    } };
+    }
+  };
 }
 
 // ============================================================
 //  STAGE 8A — NORMAL PRODUCT: Simulate Coverage launch
 //  Reuses the exact same Worker pipeline as the experimental path.
-//  No ?rt3d=1 required. Progress shown via toast (existing UI).
+// No ?rt3d=1 required. Progress shown via toast (existing UI).
 // ============================================================
 function runSimulateCoverage(){
   // DO NOT clear previous normal product result - preserve until new COMPLETE replaces it
   // rt3dNormalActive/Canvas/Meta/Spec preserved until new COMPLETE
   const t0=performance.now();
+  const simulationStartRevision = rfRevision || 0;
   const ui={ phases:[], cur:'snapshot', lastT:t0, firstCellMs:null,
              cancelled:false, finished:false, cells:0, total:0, cellsPerSec:null,
              minimized:false };
@@ -8917,7 +8979,7 @@ function runSimulateCoverage(){
 
   // ---- snapshot: the project as it is RIGHT NOW --------------------------
   const snapshot = {
-    state: JSON.parse(JSON.stringify(state, (k,v)=> k==='_img' ? undefined : v)),
+    state: JSON.parse(JSON.stringify(state, (k,v)=> (k==='_img'||k==='rfRevision'||k==='simulationRevision'||k==='simulationStartRevision'||k==='isCurrent') ? undefined : v)),
     floorIndex: floorIndex,
     spec: spec,
     planeZ: planeZ,
@@ -8932,9 +8994,17 @@ function runSimulateCoverage(){
 
   const publish=(out, col)=>{
     phase('paint');
+    // The Worker computed the snapshot taken at simulationStartRevision, so the
+    // published field corresponds to the START revision, not the revision at
+    // COMPLETE time. If the user mutated RF state mid-simulation, rfRevision has
+    // moved on and this COMPLETE must publish STALE.
+    const simulationRevision = simulationStartRevision;
+    const isCurrent = (rfRevision === simulationStartRevision);
     const res={ spec: out.spec, grid:{ best: out.best, reach: out.valid },
                 floorId: fl.id, floorIndex: floorIndex, floorName: out.diagnostics.floorName,
-                receiverPlaneZ: out.planeZ, slice: out, column: col, diagnostics: out.diagnostics };
+                receiverPlaneZ: out.planeZ, slice: out, column: col, diagnostics: out.diagnostics,
+                simulationRevision: simulationRevision, simulationStartRevision: simulationStartRevision,
+                isCurrent: isCurrent };
     rt3dExpLastStall=null; rt3dExpLastError=null;
     rt3dExpLastResult=res;
     rt3dExpCache=Object.assign({},rt3dExpCache,{ coverage:res });
@@ -8943,7 +9013,8 @@ function runSimulateCoverage(){
     rt3dNormalCanvas=rt3dExpPaint(res);
     rt3dNormalSpec=out.spec;
     rt3dNormalMeta={ floorId: fl.id, minx: out.spec.b.minx, miny: out.spec.b.miny,
-                      maxx: out.spec.b.maxx, maxy: out.spec.b.maxy };
+                      maxx: out.spec.b.maxx, maxy: out.spec.b.maxy,
+                      simulationRevision: simulationRevision, simulationStartRevision: simulationStartRevision };
     rt3dNormalActive=true;
     rt3dExpLastCoverageUi=ui;
     ui.finished=true;
@@ -8954,6 +9025,7 @@ function runSimulateCoverage(){
       '<div class="rt3dn">'+d.cellsEvaluated+' celdas en '+
       (d.totalMs>=1000?(d.totalMs/1000).toFixed(2)+' s':d.totalMs+' ms')+'</div>'
     });
+    updateSimStatus();
     draw2d(); if(view==='3d')refresh3dHeat();
   };
 
@@ -15477,7 +15549,7 @@ function buildBands(){
   const host=$('#bandPills'); host.innerHTML='';
   Object.entries(BANDS).forEach(([k,v])=>{
     const b=document.createElement('button'); b.className='pill'+(state.band===k?' active':'');
-    b.textContent=v.label; b.onclick=()=>{ state.band=k; buildBands(); scheduleHeat(); if(view==='3d')build3d(); };
+    b.textContent=v.label; b.onclick=()=>{ state.band=k; buildBands(); markRfChanged(); scheduleHeat(); if(view==='3d')build3d(); };
     host.appendChild(b);
   });
 }
@@ -15702,7 +15774,7 @@ function renderProp(){
         renderProp(); scheduleHeat(); draw2d(); if(view==='3d')build3d(); };
       pb.appendChild(btn);
     });
-    $('#pTx').oninput=e=>{ap.txPower=+e.target.value;$('#pTxV').textContent=ap.txPower+' dBm';scheduleHeat();draw2d();};
+    $('#pTx').oninput=e=>{ap.txPower=+e.target.value;$('#pTxV').textContent=ap.txPower+' dBm';markRfChanged();scheduleHeat();draw2d();};
     // The slider range already limits normal input, but the canonical model
     // must not depend on browser clamping: constrain the stored value to
     // [0.5, owningFloor.height] and write the same number back to the thumb
@@ -15713,16 +15785,16 @@ function renderProp(){
       const v=clampApMount(+e.target.value, f.height);
       ap.mount=v; e.target.value=v;
       $('#pMtV').textContent=v.toFixed(1)+' m';
-      scheduleHeat(); if(view==='3d')build3d();
+      markRfChanged(); scheduleHeat(); if(view==='3d')build3d();
     };
-    $('#pMountType').onchange=e=>{commit();ap.mountType=e.target.value==='wall'?'wall':'ceiling';scheduleHeat();draw2d();renderProp();};
-    $('#pAnt').onchange=e=>{ap.antenna.type=e.target.value;scheduleHeat();draw2d();renderProp();};
-    $('#pAz').oninput=e=>{ap.antenna.az=+e.target.value;$('#pAzV').textContent=e.target.value+'°';scheduleHeat();draw2d();};
-    $('#pTilt').oninput=e=>{ap.antenna.tilt=+e.target.value;$('#pTiltV').textContent=e.target.value+'°';scheduleHeat();};
-    $('#pGain').oninput=e=>{ap.antenna.gain=+e.target.value;$('#pGainV').textContent=(+e.target.value).toFixed(1)+' dBi';scheduleHeat();draw2d();};
-    $('#pChan').onchange=e=>{ if(!ap.channels)ap.channels=defaultChannels(); ap.channels[state.band]=+e.target.value; scheduleHeat(); };
-    $('#pX').onchange=e=>{ap.x=+e.target.value;scheduleHeat();draw2d();if(view==='3d')build3d();};
-    $('#pY').onchange=e=>{ap.y=+e.target.value;scheduleHeat();draw2d();if(view==='3d')build3d();};
+    $('#pMountType').onchange=e=>{commit(); markRfChanged(); ap.mountType=e.target.value==='wall'?'wall':'ceiling';scheduleHeat();draw2d();renderProp();};
+    $('#pAnt').onchange=e=>{commit(); markRfChanged(); ap.antenna.type=e.target.value;scheduleHeat();draw2d();renderProp();};
+    $('#pAz').oninput=e=>{ap.antenna.az=+e.target.value;$('#pAzV').textContent=e.target.value+'°';markRfChanged();scheduleHeat();draw2d();};
+    $('#pTilt').oninput=e=>{ap.antenna.tilt=+e.target.value;$('#pTiltV').textContent=e.target.value+'°';markRfChanged();scheduleHeat();};
+    $('#pGain').oninput=e=>{ap.antenna.gain=+e.target.value;$('#pGainV').textContent=(+e.target.value).toFixed(1)+' dBi';markRfChanged();scheduleHeat();draw2d();};
+    $('#pChan').onchange=e=>{ if(!ap.channels)ap.channels=defaultChannels(); ap.channels[state.band]=+e.target.value; markRfChanged(); scheduleHeat(); };
+    $('#pX').onchange=e=>{commit(); markRfChanged(); ap.x=+e.target.value;scheduleHeat();draw2d();if(view==='3d')build3d();};
+    $('#pY').onchange=e=>{commit(); markRfChanged(); ap.y=+e.target.value;scheduleHeat();draw2d();if(view==='3d')build3d();};
     $('#pDel').onclick=deleteSelection;
   }
   else if(selection.type==='rack'){
@@ -15809,23 +15881,23 @@ function renderProp(){
         <div class="field"><label>Y (m)</label><input id="pY" type="number" step="0.1" value="${p.y.toFixed(2)}"></div></div>
       <div class="stat"><span>${t('pillar.attenuation')}</span><b>${matById(p.materialId).db} dB</b></div>
       <button class="delbtn" id="pDel" ${isProj?'disabled':''}>${t('pillar.remove')}</button>`;
-    $('#pMat').onchange=e=>{commit();p.materialId=e.target.value;scheduleHeat();draw2d();if(view==='3d')build3d();renderProp();};
+    $('#pMat').onchange=e=>{commit();p.materialId=e.target.value;markRfChanged();scheduleHeat();draw2d();if(view==='3d')build3d();renderProp();};
     $('#pPillarDia').onchange=e=>{ const v=parseFloat(e.target.value);
       if(!(v>0)){ e.target.value=(p.diameter||0.6).toFixed(2); return; }
-      commit(); p.diameter=v; scheduleHeat(); draw2d(); if(view==='3d')build3d(); };
+      commit(); markRfChanged(); p.diameter=v; scheduleHeat(); draw2d(); if(view==='3d')build3d(); };
     $('#pPillarFullHeight').onchange=e=>{
       commit();
       if(e.target.checked) delete p.height;
       else p.height=Math.min(f.height,1.2);
-      scheduleHeat(); draw2d(); if(view==='3d')build3d(); renderProp();
+      markRfChanged(); scheduleHeat(); draw2d(); if(view==='3d')build3d(); renderProp();
     };
     $('#pPillarHeight').onchange=e=>{
       const v=parseFloat(e.target.value);
       if(!Number.isFinite(v)||v<0){ e.target.value=(p.height||0).toFixed(2); return; }
-      commit(); p.height=v; scheduleHeat(); draw2d(); if(view==='3d')build3d(); renderProp();
+      commit(); markRfChanged(); p.height=v; scheduleHeat(); draw2d(); if(view==='3d')build3d(); renderProp();
     };
-    $('#pX').onchange=e=>{commit();p.x=+e.target.value;scheduleHeat();draw2d();if(view==='3d')build3d();};
-    $('#pY').onchange=e=>{commit();p.y=+e.target.value;scheduleHeat();draw2d();if(view==='3d')build3d();};
+    $('#pX').onchange=e=>{commit(); markRfChanged(); p.x=+e.target.value;scheduleHeat();draw2d();if(view==='3d')build3d();};
+    $('#pY').onchange=e=>{commit(); markRfChanged(); p.y=+e.target.value;scheduleHeat();draw2d();if(view==='3d')build3d();};
     $('#pDel').onclick=deleteSelection;
   }
   else if(selection.type==='rfobj'){
@@ -15852,14 +15924,14 @@ function renderProp(){
     // Every RF-affecting property invalidates the RF model through the existing
     // debounced scheduler, so Simple RSSI/SINR refresh without a manual toggle.
     // Numeric fields keep the approved Enter/blur (onchange) behaviour.
-    $('#pRfobjWidth').onchange=e=>{ const v=parseFloat(e.target.value); if(!(v>0)){ e.target.value=ro.width.toFixed(2); return; } commit(); ro.width=v; if(view==='3d')build3d(); scheduleHeat(); draw2d(); };
-    $('#pRfobjDepth').onchange=e=>{ const v=parseFloat(e.target.value); if(!(v>0)){ e.target.value=ro.depth.toFixed(2); return; } commit(); ro.depth=v; if(view==='3d')build3d(); scheduleHeat(); draw2d(); };
-    $('#pRfobjHeight').onchange=e=>{ const v=parseFloat(e.target.value); if(!(v>0)){ e.target.value=ro.height.toFixed(2); return; } commit(); ro.height=v; if(view==='3d')build3d(); scheduleHeat(); draw2d(); };
-    $('#pRfobjRot').onchange=e=>{ const v=(+e.target.value)%360; if(!Number.isFinite(v)){ e.target.value=ro.rotation; return; } commit(); ro.rotation=v; scheduleHeat(); draw2d(); if(view==='3d')build3d(); };
-    $('#pRfobjMat').onchange=e=>{commit();ro.materialId=e.target.value;if(view==='3d')build3d();scheduleHeat();renderProp();};
-    $('#pRfobjExtraLoss').onchange=e=>{ const v=parseFloat(e.target.value); if(!Number.isFinite(v)||v<0){ e.target.value=rfObjectExtraLoss(ro); return; } commit(); ro.extraLossDb=Math.max(0,v); scheduleHeat(); renderProp(); };
-    $('#pX').onchange=e=>{const v=+e.target.value; if(!Number.isFinite(v)){ e.target.value=ro.x.toFixed(2); return; } commit(); ro.x=v; if(view==='3d')build3d(); scheduleHeat(); draw2d(); };
-    $('#pY').onchange=e=>{const v=+e.target.value; if(!Number.isFinite(v)){ e.target.value=ro.y.toFixed(2); return; } commit(); ro.y=v; if(view==='3d')build3d(); scheduleHeat(); draw2d(); };
+    $('#pRfobjWidth').onchange=e=>{ const v=parseFloat(e.target.value); if(!(v>0)){ e.target.value=ro.width.toFixed(2); return; } commit(); markRfChanged(); ro.width=v; if(view==='3d')build3d(); scheduleHeat(); draw2d(); };
+    $('#pRfobjDepth').onchange=e=>{ const v=parseFloat(e.target.value); if(!(v>0)){ e.target.value=ro.depth.toFixed(2); return; } commit(); markRfChanged(); ro.depth=v; if(view==='3d')build3d(); scheduleHeat(); draw2d(); };
+    $('#pRfobjHeight').onchange=e=>{ const v=parseFloat(e.target.value); if(!(v>0)){ e.target.value=ro.height.toFixed(2); return; } commit(); markRfChanged(); ro.height=v; if(view==='3d')build3d(); scheduleHeat(); draw2d(); };
+    $('#pRfobjRot').onchange=e=>{ const v=(+e.target.value)%360; if(!Number.isFinite(v)){ e.target.value=ro.rotation; return; } commit(); markRfChanged(); ro.rotation=v; scheduleHeat(); draw2d(); if(view==='3d')build3d(); };
+    $('#pRfobjMat').onchange=e=>{commit();markRfChanged();ro.materialId=e.target.value;if(view==='3d')build3d();scheduleHeat();renderProp();};
+    $('#pRfobjExtraLoss').onchange=e=>{ const v=parseFloat(e.target.value); if(!Number.isFinite(v)||v<0){ e.target.value=rfObjectExtraLoss(ro); return; } commit(); markRfChanged(); ro.extraLossDb=Math.max(0,v); scheduleHeat(); renderProp(); };
+    $('#pX').onchange=e=>{const v=+e.target.value; if(!Number.isFinite(v)){ e.target.value=ro.x.toFixed(2); return; } commit(); markRfChanged(); ro.x=v; if(view==='3d')build3d(); scheduleHeat(); draw2d(); };
+    $('#pY').onchange=e=>{const v=+e.target.value; if(!Number.isFinite(v)){ e.target.value=ro.y.toFixed(2); return; } commit(); markRfChanged(); ro.y=v; if(view==='3d')build3d(); scheduleHeat(); draw2d(); };
     $('#pDel').onclick=deleteSelection;
   }
   else if(selection.type==='wall'){
@@ -15887,28 +15959,28 @@ function renderProp(){
       <button class="tbtn" id="pStraighten" style="width:100%;justify-content:center;margin:8px 0">${t('wall.straighten')}</button>
       ${wallSnapControlsHtml()}
       <button class="delbtn" id="pDel" ${isProj?'disabled':''}>${t('wall.remove')}</button>`;
-    $('#pMat').onchange=e=>{w.materialId=e.target.value;scheduleHeat();draw2d();if(view==='3d')build3d();renderProp();};
+    $('#pMat').onchange=e=>{w.materialId=e.target.value;markRfChanged();scheduleHeat();draw2d();if(view==='3d')build3d();renderProp();};
     $('#pWallLen').onchange=e=>{
       const v=parseFloat(e.target.value);
       if(!(v>0)){ e.target.value=wallLen(w).toFixed(2); showToast(true,t('wall.invalidLength'),null,1600); return; }
-      commit(); setWallFromLengthAngle(w,v,wallAngleDeg(w)); geometryChanged(); renderProp();
+      commit(); markRfChanged(); setWallFromLengthAngle(w,v,wallAngleDeg(w)); geometryChanged(); renderProp();
     };
     $('#pWallAng').onchange=e=>{
       const v=parseFloat(e.target.value);
       if(!Number.isFinite(v)){ e.target.value=normAngleDeg(wallAngleDeg(w)).toFixed(1); showToast(true,t('wall.invalidAngle'),null,1600); return; }
-      commit(); setWallFromLengthAngle(w,wallLen(w),v); geometryChanged(); renderProp();
+      commit(); markRfChanged(); setWallFromLengthAngle(w,wallLen(w),v); geometryChanged(); renderProp();
     };
     $('#pWallFullHeight').onchange=e=>{
       commit();
       if(e.target.checked) delete w.height;
       else w.height=Math.min(f.height,1.2);
-      geometryChanged(); renderProp();
+      markRfChanged(); geometryChanged(); renderProp();
     };
     const wallHeightInput=$('#pWallHeight');
     if(wallHeightInput) wallHeightInput.onchange=e=>{
       const v=parseFloat(e.target.value);
       if(!Number.isFinite(v)||v<0){ e.target.value=(w.height||0).toFixed(2); return; }
-      commit(); w.height=v; geometryChanged(); renderProp();
+      commit(); markRfChanged(); w.height=v; geometryChanged(); renderProp();
     };
     // Physical thickness only: it changes the wall body, not RF. Wall
     // attenuation stays material.db per crossing, so neither the RF scheduler
@@ -15927,7 +15999,7 @@ function renderProp(){
       let best=0, bd=Infinity;
       targets.forEach(x=>{ const d=Math.abs(a-x); if(d<bd){bd=d;best=x;} });
       if(best===360) best=0;
-      commit(); setWallFromLengthAngle(w,wallLen(w),best); geometryChanged(); renderProp();
+      commit(); markRfChanged(); setWallFromLengthAngle(w,wallLen(w),best); geometryChanged(); renderProp();
     };
     wireWallSnapControls();
     $('#pDel').onclick=deleteSelection;
@@ -15948,7 +16020,7 @@ function renderProp(){
       <button class="delbtn" id="pDelMulti">${uiText('wall.removeMany',{count:n})}</button>`;
     $('#pMatMulti').onchange=e=>{ const id=e.target.value; if(!id)return;
       f.walls.forEach(w=>{ if(multiWalls.includes(w.id)) w.materialId=id; });
-      scheduleHeat(); draw2d(); if(view==='3d')build3d();
+      markRfChanged(); scheduleHeat(); draw2d(); if(view==='3d')build3d();
       showToast(true, uiMessage('wall.assigned',{count:n}),null,1600); renderProp(); };
     $('#pSelAll').onclick=selectAllWalls;
     $('#pDelMulti').onclick=deleteSelection;
@@ -15998,7 +16070,7 @@ function renderProp(){
       <div class="field"><label data-i18n="ceiling.extraLoss">Atenuación adicional (dB)</label><input id="pCeL" type="number" step="0.5" min="0" value="${passiveMaterialLossDb(c.extraLossDb)}"></div>
       <div class="stat"><span data-i18n="ceiling.effectiveLoss">Pérdida efectiva</span><b>${ceilEffectiveLoss(c).toFixed(1)} dB</b></div>
       <button class="delbtn" id="pDel" data-i18n="ceiling.delete">Eliminar techo</button>`;
-    const bump=()=>{ renderProp(); scheduleHeat(); draw2d(); if(view==='3d')build3d(); };
+    const bump=()=>{ renderProp(); markRfChanged(); scheduleHeat(); draw2d(); if(view==='3d')build3d(); };
     $('#pCeH').onchange=e=>{ commit(); c.height=Math.max(0.05,+e.target.value||0.1); bump(); };
     $('#pCeT').onchange=e=>{ commit(); c.thickness=Math.max(0.001,+e.target.value||CEIL_DEFAULT_THICKNESS); bump(); };
     $('#pCeM').onchange=e=>{ commit(); c.materialId=e.target.value; bump(); };
@@ -16425,7 +16497,7 @@ function setView(v){
 //  UNDO / REDO
 // ============================================================
 let undoStack=[], redoStack=[], _commitThrottle=0;
-function snapState(){ return JSON.stringify(state, (k,v)=> k==='_img'?undefined:v ); }
+function snapState(){ return JSON.stringify(state, (k,v)=> (k==='_img'||k==='rfRevision'||k==='simulationRevision'||k==='simulationStartRevision'||k==='isCurrent')?undefined:v ); }
 function commit(){
   try{ undoStack.push(snapState()); }catch(e){ return; }
   if(undoStack.length>80) undoStack.shift();
@@ -16453,8 +16525,10 @@ function redo(){ if(!redoStack.length)return; undoStack.push(snapState()); resto
 function updateUndoBtns(){ const u=$('#btnUndo'),r=$('#btnRedo'); if(u)u.disabled=!undoStack.length; if(r)r.disabled=!redoStack.length; }
 
 function serialize(){
-  // deep clone without _img runtime fields
-  const s=JSON.parse(JSON.stringify(state, (k,v)=> k==='_img'?undefined:v ));
+  // deep clone without _img runtime fields; freshness counters are runtime-only
+  // and must never reach project JSON (see rfRevision declaration).
+  const s=JSON.parse(JSON.stringify(state, (k,v)=> (k==='_img'||k==='rfRevision'||k==='simulationRevision'||k==='simulationStartRevision'||k==='isCurrent')?undefined:v ));
+  delete s.rfRevision; delete s.simulationRevision; delete s.simulationStartRevision; delete s.isCurrent;
   return s;
 }
 function saveProject(){
@@ -16480,6 +16554,9 @@ function loadProject(file){
       if(s.originX==null)s.originX=0;
       if(s.originY==null)s.originY=0;
       if(s.northAngle==null)s.northAngle=0;
+      // Stage 8B freshness counters are runtime-only: never adopt persisted
+      // copies from older project files that may contain them.
+      delete s.rfRevision; delete s.simulationRevision; delete s.simulationStartRevision; delete s.isCurrent;
       _indoor=null;
       state.floors.forEach(f=>{ if(f.w==null)f.w=20; if(f.d==null)f.d=14; if(!f.aps)f.aps=[]; if(!f.pillars)f.pillars=[]; if(!f.labels)f.labels=[]; if(!f.racks)f.racks=[]; if(!f.cableRoutes)f.cableRoutes=[]; if(!f.openings)f.openings=[]; if(!f.zones)f.zones=[]; if(!f.rfObjects)f.rfObjects=[]; if(f.bg&&f.bg.visible===undefined)f.bg.visible=true;
         f.aps.forEach(a=>{ if(!a.antenna)a.antenna={type:'omni',az:0,tilt:0,gain:3}; if(!a.mountType)a.mountType='ceiling'; if(a.rfEnabled==null)a.rfEnabled=true; if(!a.channels)a.channels=defaultChannels(); }); });
@@ -17504,20 +17581,20 @@ function wireGlobals(){
   $('#slabDb').oninput=e=>{ state.slabDb=+e.target.value; $('#slabDbV').textContent=state.slabDb+' dB'; syncSlabPanel(floor()); scheduleHeat(); };
   // Per-floor slab: floor 0 owns no slab, so the section is inert there.
   $('#slabMaterial').onchange=e=>{ if(state.activeFloor<=0) return; const f=floor();
-    commit(); const v=e.target.value; if(v) f.slabMaterialId=v; else delete f.slabMaterialId;
+    commit(); markRfChanged(); const v=e.target.value; if(v) f.slabMaterialId=v; else delete f.slabMaterialId;
     scheduleHeat(); syncSlabPanel(f); };
   $('#slabExtra').onchange=e=>{ if(state.activeFloor<=0) return; const f=floor();
     const v=parseFloat(e.target.value);
     if(!Number.isFinite(v)||v<0){ syncSlabPanel(f); return; }   // never RF gain
-    commit(); f.slabExtraLossDb=v; scheduleHeat(); syncSlabPanel(f); };
+    commit(); markRfChanged(); f.slabExtraLossDb=v; scheduleHeat(); syncSlabPanel(f); };
   // Generate footprint from walls (active floor panel, not the tool palette)
   $('#btnGenFootprint').onclick=generateFootprintFromWalls;
   $('#btnFpReplace').onclick=confirmFootprintReplace;
   $('#btnFpCancel').onclick=()=>{ hideFootprintConfirm();
     showToast(true, uiMessage('footprint.cancelled'), null, 2200); };
-  $('#receiverHeight').oninput=e=>{ state.receiverHeight=+e.target.value; $('#receiverHeightV').textContent=state.receiverHeight.toFixed(1)+' m'; scheduleHeat(); if(view==='3d')refresh3dHeat(); };
-  $('#planW').oninput=e=>{ floor().w=+e.target.value; $('#planWV').textContent=(+e.target.value).toFixed(1)+' m'; scheduleHeat(); draw2d(); if(view==='3d')build3d(); };
-  $('#planD').oninput=e=>{ floor().d=+e.target.value; $('#planDV').textContent=(+e.target.value).toFixed(1)+' m'; scheduleHeat(); draw2d(); if(view==='3d')build3d(); };
+  $('#receiverHeight').oninput=e=>{ state.receiverHeight=+e.target.value; $('#receiverHeightV').textContent=state.receiverHeight.toFixed(1)+' m'; markRfChanged(); scheduleHeat(); if(view==='3d')refresh3dHeat(); };
+  $('#planW').oninput=e=>{ floor().w=+e.target.value; $('#planWV').textContent=(+e.target.value).toFixed(1)+' m'; markRfChanged(); scheduleHeat(); draw2d(); if(view==='3d')build3d(); };
+  $('#planD').oninput=e=>{ floor().d=+e.target.value; $('#planDV').textContent=(+e.target.value).toFixed(1)+' m'; markRfChanged(); scheduleHeat(); draw2d(); if(view==='3d')build3d(); };
   $('#planH').oninput=e=>{
     const f=floor(); const h=+e.target.value;
     f.height=h; $('#planHV').textContent=h.toFixed(1)+' m';
@@ -17527,7 +17604,7 @@ function wireGlobals(){
     // already covered by the single pre-pointerdown commitThrottled() snapshot,
     // so Undo/Redo restores all of them together and no per-AP commit is added.
     (f.aps||[]).forEach(a=>{ if(!(a.mount<=h)) a.mount=h; });
-    scheduleHeat(); if(view==='3d')build3d(); renderProp();
+    markRfChanged(); scheduleHeat(); if(view==='3d')build3d(); renderProp();
   };
   $('#refX0').onchange=e=>{ const v=parseFloat(e.target.value); if(!Number.isFinite(v)){ syncProjectRef(); return; } state.originX=Math.round(v*1000)/1000; syncProjectRef(); draw2d(); };
   $('#refY0').onchange=e=>{ const v=parseFloat(e.target.value); if(!Number.isFinite(v)){ syncProjectRef(); return; } state.originY=Math.round(v*1000)/1000; syncProjectRef(); draw2d(); };
