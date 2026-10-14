@@ -294,6 +294,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18" opacity=".5"/></svg>
       <span data-i18n="toolbar.coverage">Täckning</span>
     </button>
+    <button class="tbtn primary" id="btnSimulate" title="Ejecutar simulación de cobertura RT3D autoritativa" data-i18n-title="toolbar.simulateCoverageTitle">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20"/><path d="M12 6v6l4 2"/></svg>
+      <span data-i18n="toolbar.simulateCoverage">Simular cobertura</span>
+    </button>
     <button class="tbtn" id="btnTrace">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/><circle cx="12" cy="12" r="3"/></svg>
       Ray tracing
@@ -482,6 +486,8 @@ const translations = {
     "toolbar.redo": "Rehacer (Ctrl/Cmd+Shift+Z)",
     "toolbar.toggleCoverage": "Mostrar/ocultar cobertura",
     "toolbar.coverage": "Cobertura",
+    "toolbar.simulateCoverage": "Simular cobertura",
+    "toolbar.simulateCoverageTitle": "Ejecutar simulación de cobertura RT3D autoritativa",
     "toolbar.saveProject": "Guardar proyecto",
     "toolbar.openProject": "Abrir proyecto",
     "toolbar.scene": "Escena 3D",
@@ -732,6 +738,8 @@ const translations = {
     "calibration.distance": "Distancia real:",
     "calibration.meters": "metros",
     "common.cancel": "Cancelar",
+    "common.minimize": "Minimizar",
+    "common.restore": "Restaurar",
     "common.apply": "Aplicar",
     "analysis.title": "Analizar plano",
     "analysis.threshold": "Umbral",
@@ -834,9 +842,17 @@ const translations = {
     "rt3d.cov.evaluate": "evaluando celdas",
     "rt3d.cov.finalize": "finalizando",
     "rt3d.cov.paint": "pintando",
+    "rt3d.cov.phase.snapshot": "Preparando proyecto",
+    "rt3d.cov.phase.world": "Construyendo modelo",
+    "rt3d.cov.phase.bvh": "Construyendo índice espacial",
+    "rt3d.cov.phase.init": "Inicializando simulación",
+    "rt3d.cov.phase.evaluate": "Evaluando cobertura",
+    "rt3d.cov.phase.finalize": "Finalizando",
+    "rt3d.cov.phase.paint": "Mostrando resultado",
     "rt3d.cov.progress": "celdas evaluadas",
     "rt3d.cov.percent": "porcentaje",
     "rt3d.cov.rate": "velocidad",
+    "rt3d.cov.rateUnit": "celdas/s",
     "rt3d.cov.elapsed": "transcurrido",
     "rt3d.cov.eta": "estimación",
     "rt3d.cov.firstCell": "primera celda",
@@ -906,6 +922,8 @@ const translations = {
     "toolbar.redo": "Redo (Ctrl/Cmd+Shift+Z)",
     "toolbar.toggleCoverage": "Show/hide coverage",
     "toolbar.coverage": "Coverage",
+    "toolbar.simulateCoverage": "Simulate Coverage",
+    "toolbar.simulateCoverageTitle": "Run authoritative RT3D coverage simulation",
     "toolbar.saveProject": "Save project",
     "toolbar.openProject": "Open project",
     "toolbar.scene": "3D scene",
@@ -1156,6 +1174,8 @@ const translations = {
     "calibration.distance": "Actual distance:",
     "calibration.meters": "meters",
     "common.cancel": "Cancel",
+    "common.minimize": "Minimize",
+    "common.restore": "Restore",
     "common.apply": "Apply",
     "analysis.title": "Analyze floor plan",
     "analysis.threshold": "Threshold",
@@ -1258,9 +1278,17 @@ const translations = {
     "rt3d.cov.evaluate": "evaluating cells",
     "rt3d.cov.finalize": "finalising",
     "rt3d.cov.paint": "painting",
+    "rt3d.cov.phase.snapshot": "Preparing project",
+    "rt3d.cov.phase.world": "Building model",
+    "rt3d.cov.phase.bvh": "Building spatial index",
+    "rt3d.cov.phase.init": "Initializing simulation",
+    "rt3d.cov.phase.evaluate": "Evaluating coverage",
+    "rt3d.cov.phase.finalize": "Finalizing",
+    "rt3d.cov.phase.paint": "Rendering result",
     "rt3d.cov.progress": "cells evaluated",
     "rt3d.cov.percent": "percent",
     "rt3d.cov.rate": "rate",
+    "rt3d.cov.rateUnit": "cells/s",
     "rt3d.cov.elapsed": "elapsed",
     "rt3d.cov.eta": "estimate",
     "rt3d.cov.firstCell": "first cell",
@@ -1330,6 +1358,8 @@ const translations = {
     "toolbar.redo": "Gör om (Ctrl/Cmd+Shift+Z)",
     "toolbar.toggleCoverage": "Visa/dölj täckning",
     "toolbar.coverage": "Täckning",
+    "toolbar.simulateCoverage": "Simulera täckning",
+    "toolbar.simulateCoverageTitle": "Kör auktoritativ RT3D-täckningssimulering",
     "toolbar.saveProject": "Spara projekt",
     "toolbar.openProject": "Öppna",
     "toolbar.scene": "3D-scen",
@@ -1580,6 +1610,8 @@ const translations = {
     "calibration.distance": "Verkligt avstånd:",
     "calibration.meters": "meter",
     "common.cancel": "Avbryt",
+    "common.minimize": "Minimera",
+    "common.restore": "Återställ",
     "common.apply": "Använd",
     "analysis.title": "Analysera ritning",
     "analysis.threshold": "Tröskel",
@@ -1682,9 +1714,17 @@ const translations = {
     "rt3d.cov.evaluate": "utvärderar celler",
     "rt3d.cov.finalize": "slutbehandlar",
     "rt3d.cov.paint": "ritar",
+    "rt3d.cov.phase.snapshot": "Förbereder projekt",
+    "rt3d.cov.phase.world": "Bygger modell",
+    "rt3d.cov.phase.bvh": "Bygger rumsindex",
+    "rt3d.cov.phase.init": "Initierar simulering",
+    "rt3d.cov.phase.evaluate": "Utvärderar täckning",
+    "rt3d.cov.phase.finalize": "Avslutar",
+    "rt3d.cov.phase.paint": "Visar resultat",
     "rt3d.cov.progress": "utvärderade celler",
     "rt3d.cov.percent": "procent",
     "rt3d.cov.rate": "hastighet",
+    "rt3d.cov.rateUnit": "celler/s",
     "rt3d.cov.elapsed": "förfluten",
     "rt3d.cov.eta": "uppskattning",
     "rt3d.cov.firstCell": "första cellen",
@@ -2458,6 +2498,16 @@ function draw2d(){
       }
       ctx.stroke(); ctx.restore();
     }
+  }
+
+  // RT3D normal-product underlay (Stage 8A). Independent of ?rt3d=1 flag.
+  // Displays the authoritative RT3D Coverage Field result from the normal workflow.
+  // Painted from its own canvas with smoothing ON for presentation (no RF data change).
+  if(rt3dNormalActive && rt3dNormalCanvas && rt3dNormalMeta && rt3dNormalMeta.floorId===f.id){
+    const a=W2S(rt3dNormalMeta.minx,rt3dNormalMeta.miny), b=W2S(rt3dNormalMeta.maxx,rt3dNormalMeta.maxy);
+    ctx.save(); ctx.globalAlpha=0.62; ctx.imageSmoothingEnabled=true;
+    ctx.drawImage(rt3dNormalCanvas, a.x, a.y, b.x-a.x, b.y-a.y);
+    ctx.restore();
   }
 
   // no-AP zones
@@ -7312,6 +7362,14 @@ let rt3dExpShowCells=false, rt3dExpCanvas=null, rt3dExpMeta=null, rt3dExpCells=n
 let rt3dExpJob=null, rt3dExpLastResult=null, rt3dExpLastError=null, rt3dExpSpec=null;
 let rt3dExpLastStall=null;
 
+// ------------------------------------------------------------
+//  STAGE 8A — NORMAL PRODUCT RT3D DISPLAY STATE
+//  Independent of ?rt3d=1 experimental flag. Used to display the
+//  authoritative RT3D Coverage Field result from the normal workflow.
+// ------------------------------------------------------------
+let rt3dNormalCanvas=null, rt3dNormalMeta=null, rt3dNormalSpec=null;
+let rt3dNormalActive=false;
+
 // Single source of truth for which engine is on screen. showHeat is the
 // application's own coverage switch, so if anything else turns it back on —
 // including the stock Ray tracing button — the legacy underlay simply wins and
@@ -8728,6 +8786,271 @@ function rt3dExpRunCoverage(){
 }
 
 // ============================================================
+//  STAGE 8A — NORMAL PRODUCT: Simulate Coverage launch
+//  Reuses the exact same Worker pipeline as the experimental path.
+//  No ?rt3d=1 required. Progress shown via toast (existing UI).
+// ============================================================
+function runSimulateCoverage(){
+  // DO NOT clear previous normal product result - preserve until new COMPLETE replaces it
+  // rt3dNormalActive/Canvas/Meta/Spec preserved until new COMPLETE
+  const t0=performance.now();
+  const ui={ phases:[], cur:'snapshot', lastT:t0, firstCellMs:null,
+             cancelled:false, finished:false, cells:0, total:0, cellsPerSec:null,
+             minimized:false };
+
+  // Phase announcer - same as experimental path
+  const phase=(next)=>{
+    const now=performance.now();
+    ui.phases.push({ name:ui.cur, ms:+(now-ui.lastT).toFixed(2) });
+    ui.cur=next; ui.lastT=now;
+    render();
+  };
+
+  // ONE delegated click listener on the stable toast container.
+  // showToast() replaces toast.innerHTML on every render, so any listener bound to
+  // an inner button node dies with that node. A Worker PROGRESS event can therefore
+  // land between the user's pointerdown and pointerup and destroy the node mid-gesture,
+  // losing the click -- which is what made a single click need several attempts.
+  // #toast itself is never replaced, so a listener bound here survives every re-render,
+  // and the browser retargets the click to this common ancestor when the inner target is
+  // replaced mid-gesture. Data-action identifies the action from whatever is under the
+  // cursor, so one physical click is always exactly one action.
+  const toastEl = $('#toast');
+  function onToastClick(e){
+    const btn = (e && e.target && e.target.closest)
+      ? e.target.closest('[data-action]') : null;
+    if(!btn) return;
+    const action = btn.getAttribute('data-action');
+    if(action==='minimize') ui.minimized=true;
+    else if(action==='restore') ui.minimized=false;
+    else if(action==='cancel'){
+      ui.cancelled=true;
+      if(rt3dExpCovJob) rt3dExpCovJob.cancel();
+    }
+    else return;
+    render();
+  }
+  if(toastEl) toastEl.addEventListener('click', onToastClick);
+
+  // Render progress in the existing toast component
+  const render=()=>{
+    const phaseLabels = {
+      snapshot: 'rt3d.cov.phase.snapshot',
+      world: 'rt3d.cov.phase.world',
+      bvh: 'rt3d.cov.phase.bvh',
+      init: 'rt3d.cov.phase.init',
+      evaluate: 'rt3d.cov.phase.evaluate',
+      finalize: 'rt3d.cov.phase.finalize',
+      paint: 'rt3d.cov.phase.paint'
+    };
+    const total=Math.max(1,ui.total);
+    const frac=Math.min(1, ui.cells/total);
+    const now=performance.now();
+    const el=Math.round(now-t0);
+    const rate=(el>40 && ui.cells>0) ? Math.round(ui.cells/(el/1000)) : null;
+    const eta=(rate && ui.cells>0 && ui.total>ui.cells)
+      ? Math.max(0, Math.round((ui.total-ui.cells)/rate)) : null;
+    const pct=(100*frac).toFixed(1);
+    let L=[];
+    if(ui.minimized){
+      // Minimized pill
+      L.push('<div class="rt3dh2" style="margin:0">'+escapeHtml(t('rt3d.cov.title'))+'</div>');
+      L.push('<div class="rt3dr" style="margin-bottom:4px"><span>'+escapeHtml(t('rt3d.cov.percent'))+'</span><b>'+pct+'%</b></div>');
+      L.push('<div class="rt3dr"><span>'+escapeHtml(t('rt3d.cov.eta'))+'</span><b>'+
+        (eta!=null?(eta>=60?Math.round(eta/60)+' min':eta+' s'):t('rt3d.cov.unknown'))+'</b></div>');
+      L.push('<button class="tbtn" data-action="restore" style="width:100%;margin-top:6px">'+
+        escapeHtml(t('common.restore'))+'</button>');
+    }else{
+      // Full card - clean user-facing layout
+      L.push('<div class="rt3dh2">'+escapeHtml(t('rt3d.cov.title'))+'</div>');
+      L.push('<div class="rt3dr"><span>'+escapeHtml(t('rt3d.cov.percent'))+'</span><b>'+pct+'%</b></div>');
+      L.push('<progress max="1" value="'+frac+'" style="width:100%"></progress>');
+      if(ui.cur==='evaluate'){
+        L.push('<div class="rt3dr"><span>'+escapeHtml(t('rt3d.cov.progress'))+'</span><b>'+
+          ui.cells.toLocaleString() + ' / ' + ui.total.toLocaleString()+'</b></div>');
+        if(rate) L.push('<div class="rt3dr"><span>'+escapeHtml(t('rt3d.cov.rate'))+'</span><b>'+
+          rate.toLocaleString()+' '+t('rt3d.cov.rateUnit')+'</b></div>');
+        L.push('<div class="rt3dr"><span>'+escapeHtml(t('rt3d.cov.elapsed'))+'</span><b>'+
+          (el>=1000?(el/1000).toFixed(1)+' s':el+' ms')+'</b></div>');
+        if(eta!=null) L.push('<div class="rt3dr"><span>'+escapeHtml(t('rt3d.cov.eta'))+'</span><b>'+
+          (eta>=60?Math.round(eta/60)+' min':eta+' s')+'</b></div>');
+      }
+      // Phase list with checkmarks - user-friendly labels
+      const allPhases=['snapshot','world','bvh','init','evaluate','finalize','paint'];
+      L.push('<div class="rt3dn" style="margin-top:4px;font-size:10px">');
+      for(const pn of allPhases){
+        const done = ui.phases.some(p=>p.name===pn);
+        const current = ui.cur===pn;
+        const icon = done ? '✓' : (current ? '●' : '○');
+        const label = escapeHtml(t(phaseLabels[pn]||pn));
+        L.push('<div style="margin:1px 0"><span style="color:'+
+          (current?'#34d6c4':(done?'#34d6c4':'#7d8a9c'))+'">'+icon+'</span> '+label+'</div>');
+      }
+      L.push('</div>');
+      // Buttons row
+      if(!ui.finished && !ui.cancelled){
+        L.push('<div style="display:flex;gap:6px;margin-top:8px">');
+        if(!ui.minimized){
+          L.push('<button class="tbtn" data-action="minimize" style="flex:1">'+
+            escapeHtml(t('common.minimize'))+'</button>');
+        }
+        L.push('<button class="tbtn" data-action="cancel" style="flex:1;background:rgba(239,95,95,.1);border-color:rgba(239,95,95,.5);color:#ef5f5f">'+
+          escapeHtml(t('common.cancel'))+'</button>');
+        L.push('</div>');
+      }else if(ui.cancelled){
+        L.push('<div class="rt3dwarn" style="margin-top:8px">'+
+          escapeHtml(t('rt3d.cov.cancelled'))+'</div>');
+      }
+    }
+    // Show in the existing toast component. Buttons carry data-action and the click
+    // is handled by the single delegated listener on #toast (attached once per run),
+    // so no per-render listener wiring is needed here.
+    showToast(true, {html: L.join('')});
+  };
+  render();
+
+  const floorIndex=state.activeFloor;
+  const fl=state.floors[floorIndex];
+  const spec=rt3dGridSpec(fl);
+  const planeZ=rt3dReceiverPlaneZForFloor(floorIndex);
+  ui.total=spec.cols*spec.rows;
+
+  // ---- snapshot: the project as it is RIGHT NOW --------------------------
+  const snapshot = {
+    state: JSON.parse(JSON.stringify(state, (k,v)=> k==='_img' ? undefined : v)),
+    floorIndex: floorIndex,
+    spec: spec,
+    planeZ: planeZ,
+    columnX: 0, columnY: 0,
+    columnZs: [0.5,1.2,2.0,2.8,4.2].filter(z=>z<floorElevation(floorIndex)+(fl.height||3)+0.5)
+  };
+
+  phase('world');
+  phase('bvh');
+  phase('init');
+  phase('evaluate');
+
+  const publish=(out, col)=>{
+    phase('paint');
+    const res={ spec: out.spec, grid:{ best: out.best, reach: out.valid },
+                floorId: fl.id, floorIndex: floorIndex, floorName: out.diagnostics.floorName,
+                receiverPlaneZ: out.planeZ, slice: out, column: col, diagnostics: out.diagnostics };
+    rt3dExpLastStall=null; rt3dExpLastError=null;
+    rt3dExpLastResult=res;
+    rt3dExpCache=Object.assign({},rt3dExpCache,{ coverage:res });
+    rt3dAuditRetainRt3d(res);
+    // Set normal-product display state (independent of ?rt3d=1)
+    rt3dNormalCanvas=rt3dExpPaint(res);
+    rt3dNormalSpec=out.spec;
+    rt3dNormalMeta={ floorId: fl.id, minx: out.spec.b.minx, miny: out.spec.b.miny,
+                      maxx: out.spec.b.maxx, maxy: out.spec.b.maxy };
+    rt3dNormalActive=true;
+    rt3dExpLastCoverageUi=ui;
+    ui.finished=true;
+    // Final toast with summary
+    const d=out.diagnostics;
+    showToast(false, {html:
+      '<div class="rt3dh2">'+escapeHtml(t('rt3d.cov.title'))+'</div>'+
+      '<div class="rt3dn">'+d.cellsEvaluated+' celdas en '+
+      (d.totalMs>=1000?(d.totalMs/1000).toFixed(2)+' s':d.totalMs+' ms')+'</div>'
+    });
+    draw2d(); if(view==='3d')refresh3dHeat();
+  };
+
+  const abort=()=>{
+    ui.finished=true;
+    // Remove the single delegated listener exactly once
+    if(toastEl) toastEl.removeEventListener('click', onToastClick);
+    // deliberately NO publish: the last valid field stays on screen
+    showToast(false, {html:
+      '<div class="rt3dwarn"><b>'+escapeHtml(t('rt3d.cov.cancelled'))+'</b><br>'+
+      escapeHtml(t('rt3d.cov.cancelledCount',{done:ui.cells.toLocaleString(),
+                                              total:ui.total.toLocaleString()}))+
+      '<br>'+escapeHtml(t('rt3d.cov.cancelledKeep'))+'</div>'+
+      (rt3dExpLastResult?('<div class="rt3dn">'+escapeHtml(t('rt3d.cov.keeping'))+' '+
+        escapeHtml(rt3dExpLastResult.floorName)+' (Z '+
+        rt3dExpLastResult.receiverPlaneZ.toFixed(2)+' m)</div>'):'')
+    });
+  };
+
+  const workerError=(message)=>{
+    ui.finished=true;
+    // Remove the single delegated listener exactly once
+    if(toastEl) toastEl.removeEventListener('click', onToastClick);
+    showToast(false, {html:
+      '<div class="rt3dwarn"><b>'+escapeHtml(t('rt3d.cov.workerError'))+'</b><br>'+
+      escapeHtml(message)+'<br>'+escapeHtml(t('rt3d.cov.cancelledKeep'))+'</div>'+
+      (rt3dExpLastResult?('<div class="rt3dn">'+escapeHtml(t('rt3d.cov.keeping'))+' '+
+        escapeHtml(rt3dExpLastResult.floorName)+' (Z '+
+        rt3dExpLastResult.receiverPlaneZ.toFixed(2)+' m)</div>'):'')
+    });
+  };
+
+  const finish=(payload)=>{
+    phase('finalize');
+    // Remove the single delegated listener exactly once
+    if(toastEl) toastEl.removeEventListener('click', onToastClick);
+    const out = {
+      spec: payload.spec, planeZ: payload.planeZ,
+      best: payload.grid.best, apBest: payload.grid.apBest, valid: payload.grid.valid,
+      cols: payload.spec.cols, rows: payload.spec.rows,
+      totalCells: payload.spec.cols*payload.spec.rows,
+      evaluatedCells: payload.evaluatedCells, validCells: payload.validCells,
+      noSignalCells: payload.noSignalCells, complete: payload.complete, row: payload.row,
+      sources: payload.sources,
+      diagnostics: Object.assign({}, payload.diagnostics)
+    };
+    out.diagnostics.floorIndex=floorIndex;
+    out.diagnostics.floorName=fl.name||('F'+(floorIndex+1));
+    out.diagnostics.phases=ui.phases.slice();
+    out.diagnostics.timeToFirstCellMs=ui.firstCellMs;
+    out.diagnostics.totalMs=+(performance.now()-t0).toFixed(2);
+    if(out.evaluatedCells>0 && out.diagnostics.totalMs>0)
+      out.diagnostics.cellsPerSec=Math.round(out.evaluatedCells/(out.diagnostics.totalMs/1000));
+    rt3dExpLastCoverage=out;
+    rt3dExpLastColumn=payload.column;
+    rt3dExpLastCoverageBest = out.best;
+    publish(out, payload.column);
+  };
+
+  // ---- drive the worker --------------------------------------------------
+  let jobId;
+  try {
+    jobId = rt3dExpWorkerStart(snapshot, {
+      onProgress: (m)=>{
+        if(rt3dExpCovJob && rt3dExpCovJob.id!==m.jobId) return;
+        ui.cells=m.evaluatedCells;
+        if(ui.firstCellMs===null && m.evaluatedCells>0)
+          ui.firstCellMs=+(performance.now()-t0).toFixed(1);
+        render();
+      },
+      onComplete: (m)=>{
+        if(rt3dExpCovJob && rt3dExpCovJob.id!==m.jobId) return;
+        finish(m);
+      },
+      onCancelled: (m)=>{
+        if(rt3dExpCovJob && rt3dExpCovJob.id!==m.jobId) return;
+        abort();
+      },
+      onError: (m)=>{
+        if(rt3dExpCovJob && rt3dExpCovJob.id!==m.jobId) return;
+        workerError(m.message);
+      }
+    });
+  } catch(err){
+    workerError(String(err && err.message ? err.message : err));
+    return;
+  }
+  rt3dExpCovJob={ id: jobId,
+    cancel(){
+      ui.cancelled=true;
+      ui.finished=true;
+      rt3dExpWorkerCancel(jobId);
+    } };
+}
+
+// ============================================================
+//  STAGE 6.5 — LEGACY vs RT3D RF TRUTH AUDIT (development only)// ============================================================
 //  STAGE 6.5 — LEGACY vs RT3D RF TRUTH AUDIT (development only)
 //  Reachable only with ?rt3d=1. Never a coverage mode.
 //
@@ -14947,6 +15270,7 @@ function duplicateFloor(i){
 function setActiveFloor(i){
   state.activeFloor=i; select(null); buildFloors(); updateChips(); syncFloorPanel();
   clearFootprintDiagnostics();   // the markers belong to the floor you left
+  rt3dNormalActive=false; rt3dNormalCanvas=null; rt3dNormalMeta=null; rt3dNormalSpec=null;  // normal RT3D result is floor-specific
   scheduleHeat();
   if(view==='3d') build3d();
   draw2d();
@@ -15729,8 +16053,14 @@ function showToast(show,msg,progress,autoMs){
   const t=$('#toast'); clearTimeout(toastTimer);
   if(!show){ t.style.display='none'; return; }
   let html='';
-  if(progress===null||progress===undefined){ html=`<span>${(msg&&msg.key?uiText(msg.key,msg.params):escapeHtml(msg))}</span>`; }
-  else { html=`<span class="spin"></span><span>${(msg&&msg.key?uiText(msg.key,msg.params):escapeHtml(msg))}</span><progress max="1" value="${progress}"></progress>`; }
+  // Support raw HTML via msg.html property (for progress UIs with custom content)
+  if(msg && msg.html){
+    html = msg.html;
+  } else if(progress===null||progress===undefined){
+    html=`<span>${(msg&&msg.key?uiText(msg.key,msg.params):escapeHtml(msg))}</span>`;
+  } else {
+    html=`<span class="spin"></span><span>${(msg&&msg.key?uiText(msg.key,msg.params):escapeHtml(msg))}</span><progress max="1" value="${progress}"></progress>`;
+  }
   t.innerHTML=html; t.style.display='flex';
   if(autoMs){ toastTimer=setTimeout(()=>t.style.display='none',autoMs); }
 }
@@ -17162,6 +17492,7 @@ function wireGlobals(){
   $('#btnHeat').onclick=()=>{ showHeat=!showHeat; $('#btnHeat').classList.toggle('primary',showHeat);
     $('#legend').classList.toggle('off',!showHeat); if(showHeat)scheduleHeat(); else {heatCanvas=null;draw2d();if(view==='3d')refresh3dHeat();} };
   $('#btnTrace').onclick=()=>{ runRayTrace(()=>{}); };
+  $('#btnSimulate').onclick=runSimulateCoverage;
   $('#btnSave').onclick=saveProject;
   $('#btnLoad').onclick=()=>$('#fileLoad').click();
   $('#fileLoad').onchange=e=>{ if(e.target.files[0])loadProject(e.target.files[0]); e.target.value=''; };
