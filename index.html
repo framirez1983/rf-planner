@@ -9174,8 +9174,14 @@ function runSimulateCoverage(){
 //  interpolate between exact samples on screen but never modifies stored data.
 // ============================================================
 const RT3D_VOLUME_CELL = 0.48;        // XY visualization sampling step (m)
-const RT3D_VOLUME_MAX_PLANES = 4;     // tomography layer cap for Stage 9A
+const RT3D_VOLUME_MAX_PLANES = 8;     // tomography/cloud layer count for Stage 9B
 const RT3D_VOLUME_DEDUP_M = 0.12;     // planes closer than this merge
+const RT3D_VOLUME_SHADER_MAX = 12;    // shader uniform array cap (must exceed MAX_PLANES)
+const RT3D_VOLUME_STEPS = 64;        // conservative default raymarch step budget
+// Display-only volumetric density scale (extinction per meter at full density).
+// Centralized here so the RSSI->opacity mapping has exactly one definition.
+// These shape APPEARANCE only: no RSSI value is ever altered by them.
+const RT3D_VOLUME_DMAX = 2.0;
 
 // Independent ephemeral retained volume. Never serialized, never in project
 // state or undo history — same runtime-only rule as rt3dNormal*.
@@ -9194,21 +9200,26 @@ function rt3dVolumeSpec(f){
   return { b:b, cell:cell, cols:cols, rows:rows, cw:cw, ch:ch, raySpacing:Math.min(cw,ch) };
 }
 
-// Up to four useful absolute world-Z planes inside the active floor.
+// Up to RT3D_VOLUME_MAX_PLANES useful absolute world-Z planes inside a floor.
 // One plane is ALWAYS exactly floorElevation(active)+receiverHeight().
-// The rest span the usable interior with a margin from slab/ceiling.
+// The rest span the usable interior uniformly with a margin from slab/ceiling.
 // Derived from floor height — no hardcoded absolute heights.
-function rt3dVolumePlanes(floorIndex){
+function rt3dVolumePlanes(floorIndex, count){
   const fi=(floorIndex==null)?state.activeFloor:floorIndex;
   const f=state.floors[fi]; if(!f) return [];
+  const n=clamp(count==null?RT3D_VOLUME_MAX_PLANES:count,1,RT3D_VOLUME_SHADER_MAX);
   const elev=floorElevation(fi);
   const h=(Number.isFinite(f.height)&&f.height>0)?f.height:3.0;
   const rx=elev+receiverHeight();
   const margin=Math.min(0.25,Math.max(0.08,h*0.08));
   const lo=elev+margin, hi=elev+h-margin;
   let cands;
-  if(!(hi>lo)) cands=[rx];
-  else cands=[lo, elev+h/2, hi, rx];
+  if(!(hi>lo)||n<=1) cands=[rx];
+  else{
+    cands=[];
+    for(let k=0;k<n-1;k++) cands.push(lo+k*(hi-lo)/Math.max(n-2,1));
+    cands.push(rx);
+  }
   cands.sort((a,b)=>a-b);
   // Deduplicate: the exact receiver plane always wins a merge.
   const out=[];
@@ -9231,7 +9242,7 @@ function rt3dVolumePlanes(floorIndex){
     if(drop>=0) out.splice(drop,1);
     out.push(rx); out.sort((a,b)=>a-b);
   }
-  return out.slice(0,RT3D_VOLUME_MAX_PLANES);
+  return out.slice(0,n);
 }
 
 // Canonical world-Z to floor-local-Y for 3D placement. A project point
@@ -9287,13 +9298,105 @@ function rt3dVolumePaintPlane(spec, best){
   return c;
 }
 
-function refresh3dVolume(){
+// ------------------------------------------------------------
+//  STAGE 9B — DISPLAY-VOLUME PACKING (visualization only)
+//
+//  The authoritative samples stay Float32Array best[] per exact plane.
+//  Everything below derives DISPLAY bytes from them and never writes back:
+//  quantization, density and layer mapping are presentation transforms.
+// ------------------------------------------------------------
+// 0.5 dB visualization quantization of one RSSI value to one display byte.
+// Bin 0 is reserved for invalid/no-signal; valid values map to 1..255.
+function rt3dVolumeQuantize(rssi){
+  if(!(rssi>-Infinity)) return 0;
+  return clamp(Math.round((rssi+100)*2),0,255);
+}
+function rt3dVolumeDequantize(q){
+  return q/2-100;
+}
+// RSSI -> volumetric extinction density (per meter). DISPLAY ONLY.
+// Piecewise-linear, continuous across bands; coefficients live only here.
+// Deliberately NOT tied to project coverageThreshold: this shapes how the
+// cloud looks, never what the field contains.
+function rt3dVolumeDensityAt(rssi){
+  if(!(rssi>-Infinity)) return 0;
+  if(rssi>=-55) return 2.0;
+  if(rssi>=-67) return lerp(2.0, 0.5, (-55-rssi)/12);
+  if(rssi>=-80) return lerp(0.5, 0.06, (-67-rssi)/13);
+  if(rssi>-90) return lerp(0.06, 0.005, (-80-rssi)/10);
+  return 0;
+}
+// Physical worldZ -> fractional texture layer for a NONUNIFORM zs[].
+// zs[i]<=worldZ<=zs[i+1] gives layer i+t with t=(worldZ-zs[i])/(zs[i+1]-zs[i]).
+// The GLSL volumeLayerAt() mirrors this exactly; this JS copy is the tested
+// reference. Outside the sampled span the nearest layer clamps.
+function rt3dVolumeLayerAt(worldZ, zs){
+  const n=zs.length; if(!n) return 0;
+  if(worldZ<=zs[0]) return 0;
+  for(let i=0;i<n-1;i++){
+    const z0=zs[i], z1=zs[i+1];
+    if(worldZ<=z1){
+      const t=(worldZ>=z0)?(worldZ-z0)/Math.max(z1-z0,1e-6):0;
+      return i+clamp(t,0,1);
+    }
+  }
+  return n-1;
+}
+// Pack exact plane fields into one UnsignedByte display brick:
+// data[(l*rows+j)*cols+i] = quantized Coverage at cell (i,j) on plane l.
+// The input Float32Arrays are only read.
+function rt3dVolumePackPlanes(spec, planes){
+  const n=spec.cols*spec.rows, depth=planes.length;
+  const data=new Uint8Array(n*depth);
+  for(let l=0;l<depth;l++){
+    const best=planes[l].best, off=l*n;
+    for(let k=0;k<n;k++) data[off+k]=rt3dVolumeQuantize(best[k]);
+  }
+  return { data:data, cols:spec.cols, rows:spec.rows, depth:depth };
+}
+// Color LUT baked from the application's own rssiColor(), so 2D slice,
+// tomography sheets and cloud share one color semantic. Entry q covers the
+// bin centered at dequantized RSSI; alpha carries DENSITY (not opacity):
+// the shader computes per-step alpha as 1-exp(-density*stepLength).
+function rt3dVolumeBuildLUT(){
+  const lut=new Uint8Array(256*4);
+  for(let q=0;q<256;q++){
+    const col=rssiColor(rt3dVolumeDequantize(q));
+    lut[q*4]=col[0]; lut[q*4+1]=col[1]; lut[q*4+2]=col[2];
+    lut[q*4+3]=Math.round(clamp(rt3dVolumeDensityAt(rt3dVolumeDequantize(q))/RT3D_VOLUME_DMAX,0,1)*255);
+  }
+  return lut;
+}
+// World point -> display-texture coordinate mirror of the in-shader mapping.
+// u = project X fraction, v = project Y fraction (NO flip: v=0 is miny, the
+// same row orientation the packer and the 9A sheets use), layer = fractional
+// tomography layer from rt3dVolumeLayerAt. Tested reference for the swizzle
+// vec3(uvw.x, uvw.z, layer) the GLSL must perform.
+function rt3dVolumeTexCoord(px, py, wz, b, zs){
+  const u=(px-b.minx)/(b.maxx-b.minx), v=(py-b.miny)/(b.maxy-b.miny);
+  return [u, v, rt3dVolumeLayerAt(wz, zs)];
+}
+// Reference integrator for a uniform-density segment: front-to-back
+// emission/absorption with per-step alpha from PHYSICAL step length.
+// Used by tests to prove step-count stability (64 vs 96 steps).
+function rt3dVolumeIntegrateUniform(density, lengthM, steps){
+  const dt=lengthM/steps;
+  const a=1-Math.exp(-density*dt);
+  let trans=1;
+  for(let s=0;s<steps;s++){ trans*=1-a; if(trans<0.01) break; }
+  return 1-trans;
+}
+
+function clearVolumeSheets(){
   for(const m of volumePlanes3d){
     if(m.parent) m.parent.remove(m);
     if(m.geometry) m.geometry.dispose();
     if(m.material){ if(m.material.map) m.material.map.dispose(); m.material.dispose(); }
   }
   volumePlanes3d=[];
+}
+function refresh3dVolume(){
+  clearVolumeSheets();
   if(!three || !rt3dVolume) return;
   if(rt3dVolume.floorId!==floor().id) return;   // floor-gated, like 2D
   const spec=rt3dVolume.spec, b=spec.b;
@@ -9461,7 +9564,7 @@ function runVolumeCoverage(){
         cells:payload.evaluatedCells}))+'</div>'
     });
     updateVolStatus();
-    if(view==='3d') refresh3dVolume();
+    if(view==='3d') update3dVolumeView();
   };
   const abort=()=>{
     ui.finished=true;
@@ -9520,6 +9623,298 @@ function runVolumeCoverage(){
       ui.finished=true;
       rt3dExpWorkerCancel(jobId);
     } };
+}
+
+// ============================================================
+//  STAGE 9B — VOLUMETRIC COVERAGE CLOUD (raymarched display)
+//
+//  The SAME exact Coverage(x,y,z) samples Stage 9A retains, shown as one
+//  continuous-looking volume instead of discrete sheets. No new RF physics:
+//  exact Float32 plane samples are packed to display bytes (0.5 dB, read
+//  only), GPU filtering interpolates between them for DISPLAY ONLY, and the
+//  stored samples are never modified.
+//
+//  Opacity is volumetric, never a fixed per-step alpha: the LUT carries
+//  extinction DENSITY per RSSI bin and each raymarch step computes
+//  alphaStep = 1-exp(-density*stepLength), so appearance is stable across
+//  step counts. Physical Z positions are nonuniform: the shader brackets
+//  every sample against the authoritative zs[] (mirroring
+//  rt3dVolumeLayerAt) instead of assuming uniform layers.
+// ============================================================
+let cloudMesh=null, cloudVolTex=null, cloudLUTTex=null;
+
+// Dev/debug override back to sheets: ?sheets=1 or window.__RT3D_SHEETS__.
+// Normal product shows the cloud whenever the GPU path is available.
+function rt3dVolumeSheetsForced(){
+  try{
+    if(typeof window!=='undefined' && window.__RT3D_SHEETS__===true) return true;
+    return /(?:\?|&)sheets=1(?:&|$)/.test((typeof location!=='undefined'&&location.search)||'');
+  }catch(_){ return false; }
+}
+// WebGL2 + DataTexture3D (r128 core) is the hard requirement for the cloud.
+// Anything else falls back to the Stage 9A sheets — never a crash.
+function rt3dCloudSupported(){
+  try{
+    return !!(three && three.renderer && three.renderer.capabilities &&
+      three.renderer.capabilities.isWebGL2 && typeof THREE.DataTexture3D==='function');
+  }catch(_){ return false; }
+}
+function clearCloudMesh(){
+  if(cloudMesh){
+    if(cloudMesh.parent) cloudMesh.parent.remove(cloudMesh);
+    if(cloudMesh.geometry) cloudMesh.geometry.dispose();
+    if(cloudMesh.material) cloudMesh.material.dispose();
+    cloudMesh=null;
+  }
+  if(cloudVolTex){ cloudVolTex.dispose(); cloudVolTex=null; }
+  if(cloudLUTTex){ cloudLUTTex.dispose(); cloudLUTTex=null; }
+}
+
+// GLSL3 volume raymarcher (three r128 core ShaderMaterial, no addons).
+// uVol holds quantized samples; uLUT holds rssiColor() hues + density.
+// uZs carries the authoritative nonuniform plane heights for exact
+// worldZ -> fractional-layer mapping. uDepthMap (opaque depth prepass)
+// terminates rays at building geometry; uUseDepth=0 disables that term.
+const RT3D_CLOUD_VERT=`
+out vec3 vWorldPos;
+void main(){
+  vec4 wp = modelMatrix * vec4(position, 1.0);
+  vWorldPos = wp.xyz;
+  gl_Position = projectionMatrix * viewMatrix * wp;
+}`;
+const RT3D_CLOUD_FRAG=`
+precision highp float;
+precision highp int;
+uniform highp sampler3D uVol;
+uniform highp sampler2D uLUT;
+uniform highp sampler2D uDepthMap;
+uniform vec3 uMin;
+uniform vec3 uSize;
+uniform float uZs[12];
+uniform int uDepth;
+uniform int uSteps;
+uniform float uDMax;
+uniform float uDensity;
+uniform float uUseDepth;
+uniform float uNear;
+uniform float uFar;
+uniform vec2 uResolution;
+in vec3 vWorldPos;
+out vec4 fragColor;
+// Self-contained depth unpack (three's packing chunk equivalent): inverse of
+// the perspective divide, mapping the [0,1] depth buffer value back to a
+// negative view-space Z. Inlined so this shader has no chunk coupling.
+float perspectiveDepthToViewZ(float invClipZ, float near, float far){
+  return (near * far) / ((far - near) * invClipZ - far);
+}
+// Row-orientation contract (traced through the packing, not guessed):
+//   best[k], k=j*cols+i, has cell centre y=b.miny+(j+0.5)*ch, so j=0 is miny.
+//   pack writes data[(l*rows+j)*cols+i], i.e. texel (x=i, y=j): v_tex=0 is miny.
+//   three z = project y - cz, so normalized uvw.z=0 is miny as well.
+// Hence texture V tracks uvw.z with NO flip; texture X tracks project X;
+// texture Z is the tomography layer. The sample MUST be vec3(uvw.x, uvw.z, layer).
+float volumeLayerAt(float wz){
+  float last = float(uDepth - 1);
+  if(wz <= uZs[0]) return 0.0;
+  for(int i=0;i<11;i++){
+    if(i > uDepth - 2) break;
+    float z0 = uZs[i];
+    float z1 = uZs[i + 1];
+    if(wz <= z1){
+      float t = (wz >= z0) ? (wz - z0) / max(z1 - z0, 1e-6) : 0.0;
+      return float(i) + clamp(t, 0.0, 1.0);
+    }
+  }
+  return last;
+}
+void main(){
+  vec3 ro = cameraPosition;
+  vec3 rd = normalize(vWorldPos - ro);
+  vec3 rdd = rd + vec3(1e-8, 1e-8, 1e-8);
+  vec3 invD = 1.0 / rdd;
+  vec3 bmax = uMin + uSize;
+  vec3 tA = (uMin - ro) * invD;
+  vec3 tB = (bmax - ro) * invD;
+  vec3 tmn = min(tA, tB);
+  vec3 tmx = max(tA, tB);
+  float tEnter = max(max(tmn.x, tmn.y), tmn.z);
+  float tExit = min(min(tmx.x, tmx.y), tmx.z);
+  tEnter = max(tEnter, 0.0);
+  if(uUseDepth > 0.5){
+    float sceneDepth = texture(uDepthMap, gl_FragCoord.xy / uResolution).x;
+    if(sceneDepth < 1.0){
+      float sceneViewZ = perspectiveDepthToViewZ(sceneDepth, uNear, uFar);
+      vec4 r0v = viewMatrix * vec4(ro, 1.0);
+      vec4 rdv = viewMatrix * vec4(rd, 0.0);
+      if(abs(rdv.z) > 1e-7){
+        float tScene = (sceneViewZ - r0v.z) / rdv.z;
+        tExit = min(tExit, max(tScene, 0.0));
+      }
+    }
+  }
+  float tLen = tExit - tEnter;
+  if(tLen <= 0.0) discard;
+  float dt = tLen / float(uSteps);
+  float jitter = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+  float t = tEnter + dt * jitter;
+  vec3 acc = vec3(0.0);
+  float trans = 1.0;
+  for(int s=0;s<128;s++){
+    if(s >= uSteps) break;
+    if(trans < 0.01) break;
+    vec3 p = ro + rd * (t + dt * 0.5);
+    vec3 uvw = (p - uMin) / uSize;
+    float wz = uMin.y + uvw.y * uSize.y;
+    float layer = volumeLayerAt(wz);
+    float q = texture(uVol, vec3(uvw.x, uvw.z, (layer + 0.5) / float(uDepth))).r;
+    vec4 lut = texture(uLUT, vec2(q, 0.5));
+    float dens = lut.a * uDMax * uDensity;
+    float aStep = 1.0 - exp(-dens * dt);
+    acc += trans * aStep * lut.rgb;
+    trans *= 1.0 - aStep;
+    t += dt;
+  }
+  fragColor = vec4(acc, 1.0 - trans);
+}`;
+
+// Build (or rebuild) the cloud from the retained exact volume.
+// Returns true when the cloud is on screen, false for sheets fallback.
+function refresh3dCloud(){
+  clearCloudMesh();
+  if(!three || !rt3dVolume) return false;
+  if(rt3dVolume.floorId!==floor().id) return false;   // floor-gated, like 2D
+  if(rt3dVolumeSheetsForced()) return false;          // dev/debug sheets
+  if(three.cloudFailed) return false;                   // program failed once: stay on sheets
+  if(!rt3dCloudSupported()) return false;             // WebGL1 -> sheets
+  const spec=rt3dVolume.spec, b=spec.b, zs=rt3dVolume.zs;
+  const nz=zs.length;
+  if(!(nz>=1)||nz>RT3D_VOLUME_SHADER_MAX) return false;
+  try{
+    const fb=floorBounds(floor());
+    const cx=(fb.minx+fb.maxx)/2, cz=(fb.miny+fb.maxy)/2;
+    const pack=rt3dVolumePackPlanes(spec, rt3dVolume.planes);
+    // Byte-exact upload contract (traced through r128 WebGLTextures):
+    // DataTexture3D defaults to RGBAFormat (4 bytes/texel), but the packer
+    // emits ONE byte per voxel. RedFormat+UnsignedByteType selects R8, a
+    // color-filterable WebGL2 format, so texImage3D expects exactly
+    // cols*rows*depth bytes. DataTexture3D already defaults flipY=false and
+    // unpackAlignment=1; both are set explicitly so no default is assumed.
+    if(pack.data.length!==pack.cols*pack.rows*pack.depth) return false;
+    if(!(pack.cols>0&&pack.rows>0&&pack.depth>0)) return false;
+    cloudVolTex=new THREE.DataTexture3D(pack.data, pack.cols, pack.rows, pack.depth);
+    cloudVolTex.format=THREE.RedFormat;
+    cloudVolTex.type=THREE.UnsignedByteType;
+    cloudVolTex.unpackAlignment=1;
+    cloudVolTex.flipY=false;
+    cloudVolTex.magFilter=THREE.LinearFilter;   // display-only interpolation
+    cloudVolTex.minFilter=THREE.LinearFilter;
+    cloudVolTex.wrapS=THREE.ClampToEdgeWrapping;
+    cloudVolTex.wrapT=THREE.ClampToEdgeWrapping;
+    cloudVolTex.needsUpdate=true;
+    const lut=rt3dVolumeBuildLUT();
+    cloudLUTTex=new THREE.DataTexture(lut, 256, 1, THREE.RGBAFormat);
+    cloudLUTTex.magFilter=THREE.NearestFilter;  // exact bin lookup
+    cloudLUTTex.minFilter=THREE.NearestFilter;
+    cloudLUTTex.needsUpdate=true;
+    const zarr=[];
+    for(let i=0;i<RT3D_VOLUME_SHADER_MAX;i++) zarr.push(i<nz?zs[i]:zs[nz-1]);
+    const w=b.maxx-b.minx, h=zs[nz-1]-zs[0], dd=b.maxy-b.miny;
+    if(!(w>0&&dd>0&&h>0)) return false;
+    const g=new THREE.BoxGeometry(w,h,dd);
+    const m=new THREE.ShaderMaterial({
+      glslVersion: THREE.GLSL3,
+      uniforms: {
+        uVol:{ value:cloudVolTex }, uLUT:{ value:cloudLUTTex },
+        uDepthMap:{ value:null },
+        uMin:{ value:new THREE.Vector3(b.minx-cx, zs[0], b.miny-cz) },
+        uSize:{ value:new THREE.Vector3(w, h, dd) },
+        uZs:{ value:zarr }, uDepth:{ value:nz }, uSteps:{ value:RT3D_VOLUME_STEPS },
+        uDMax:{ value:RT3D_VOLUME_DMAX }, uDensity:{ value:1.0 },
+        uUseDepth:{ value:0 }, uNear:{ value:0.1 }, uFar:{ value:500 },
+        uResolution:{ value:new THREE.Vector2(1,1) }
+      },
+      vertexShader: RT3D_CLOUD_VERT, fragmentShader: RT3D_CLOUD_FRAG,
+      // The marcher outputs ASSOCIATED (premultiplied) color: acc holds the
+      // transmittance-weighted sum and alpha the absorbed fraction. r128 has
+      // no PremultipliedAlphaBlending constant; the r128 API for this is
+      // NormalBlending (the default, stated explicitly) with the material's
+      // premultipliedAlpha=true, which WebGLState turns into blend factors
+      // ONE / ONE_MINUS_SRC_ALPHA -- the exact match for associated output.
+      // Default NormalBlending alone would use SRC_ALPHA and multiply rgb by
+      // alpha a second time, darkening the cloud.
+      blending: THREE.NormalBlending,
+      premultipliedAlpha: true,
+      transparent: true, depthWrite: false, depthTest: true, side: THREE.DoubleSide
+    });
+    cloudMesh=new THREE.Mesh(g,m);
+    cloudMesh.position.set((b.minx+b.maxx)/2-cx, (zs[0]+zs[nz-1])/2, (b.miny+b.maxy)/2-cz);
+    cloudMesh.renderOrder=5;
+    cloudMesh.frustumCulled=false;
+    three.root.add(cloudMesh);
+    return true;
+  }catch(_){ clearCloudMesh(); return false; }
+}
+
+// Normal-product 3D volume view: cloud when possible, sheets otherwise.
+// Never both at once.
+function update3dVolumeView(){
+  if(refresh3dCloud()){ clearVolumeSheets(); }
+  else{ clearCloudMesh(); refresh3dVolume(); }
+}
+
+// Program-link watchdog: three compiles GLSL synchronously during render and,
+// with the default debug.checkShaderErrors, records per-program diagnostics
+// (runnable flag) on renderer.info.programs, keyed by a cacheKey containing
+// the shader source. A CLEAN compile leaves NO diagnostics entry, so only an
+// explicit runnable===false condemns the cloud; a missing entry or API means
+// "not compiled yet / unavailable" and never triggers the fallback.
+function cloudProgramFailed(){
+  try{
+    const list=three.renderer.info&&three.renderer.info.programs;
+    if(!list) return false;
+    for(const p of list){
+      if(p&&p.cacheKey&&p.cacheKey.indexOf('volumeLayerAt')>=0){
+        if(p.diagnostics) return p.diagnostics.runnable===false;
+        return false;
+      }
+    }
+  }catch(_){}
+  return false;
+}
+// Opaque-scene depth prepass for cloud ray termination. Transparent helpers
+// (including the cloud itself and tomography sheets) are hidden for the
+// prepass and restored in a finally, so they can never contaminate the
+// opaque depth texture. Any failure disables depth termination only.
+function volumeDepthPrepass(){
+  if(!three || !cloudMesh || !cloudMesh.visible) return false;
+  try{
+    const size=new THREE.Vector2();
+    three.renderer.getDrawingBufferSize(size);
+    const W=Math.max(2,size.x|0), H=Math.max(2,size.y|0);
+    if(!three.depthTarget||three.depthTarget.width!==W||three.depthTarget.height!==H){
+      if(three.depthTarget) three.depthTarget.dispose();
+      const dt=new THREE.DepthTexture(W,H);
+      dt.magFilter=THREE.NearestFilter; dt.minFilter=THREE.NearestFilter;
+      three.depthTarget=new THREE.WebGLRenderTarget(W,H,
+        { depthTexture:dt, depthBuffer:true, stencilBuffer:false });
+    }
+    const hidden=[];
+    three.scene.traverse(o=>{
+      if(o.isMesh&&o.material&&o.material.transparent){ hidden.push(o); o.visible=false; }
+    });
+    try{
+      three.renderer.setRenderTarget(three.depthTarget);
+      three.renderer.render(three.scene, three.cam);
+    }finally{
+      three.renderer.setRenderTarget(null);
+      for(const o of hidden) o.visible=true;
+    }
+    const u=cloudMesh.material.uniforms;
+    u.uDepthMap.value=three.depthTarget.depthTexture;
+    u.uUseDepth.value=1;
+    u.uResolution.value.set(W,H);
+    return true;
+  }catch(_){ return false; }
 }
 
 // ============================================================
@@ -13373,7 +13768,30 @@ function animate3d(){
   const cz=o.tz+o.r*Math.cos(o.el)*Math.cos(o.az);
   three.cam.position.set(cx,cy,cz);
   three.cam.lookAt(o.tx,o.ty,o.tz);
+  if(cloudMesh&&cloudMesh.visible){
+    try{ if(!volumeDepthPrepass()) cloudMesh.material.uniforms.uUseDepth.value=0; }
+    catch(_){ /* depth termination is optional; the cloud still renders */ }
+  }
   three.renderer.render(three.scene,three.cam);
+  // Cloud program watchdog (one check per cloud mesh): a shader that failed to
+  // link leaves no usable cloud, so fall back to the Stage-9A sheets instead
+  // of a blank volume. Runs at most once per mesh; never breaks rendering.
+  if(cloudMesh&&cloudMesh.visible&&!cloudMesh.userData.programChecked){
+    try{
+      if(cloudProgramFailed()){
+        cloudMesh.userData.programChecked=true;
+        three.cloudFailed=true;
+        clearCloudMesh(); refresh3dVolume();
+      }else{
+        const list=(three.renderer.info&&three.renderer.info.programs)||[];
+        for(const p of list){
+          if(p&&p.cacheKey&&p.cacheKey.indexOf('volumeLayerAt')>=0){
+            cloudMesh.userData.programChecked=true; break;
+          }
+        }
+      }
+    }catch(_){ /* the watchdog itself must never break the frame */ }
+  }
 }
 function resize3d(){
   if(!three)return;
@@ -15646,7 +16064,7 @@ function build3d(){
     three.floorGroups[idx]=fl;
   });
   refresh3dHeat();
-  refresh3dVolume();
+  update3dVolumeView();
 }
 let heatPlane=null;
 function refresh3dHeat(){
@@ -15747,7 +16165,7 @@ function setActiveFloor(i){
   state.activeFloor=i; select(null); buildFloors(); updateChips(); syncFloorPanel();
   clearFootprintDiagnostics();   // the markers belong to the floor you left
   rt3dNormalActive=false; rt3dNormalCanvas=null; rt3dNormalMeta=null; rt3dNormalSpec=null;  // normal RT3D result is floor-specific
-  rt3dVolume=null; volumePlanes3d=[]; updateVolStatus();  // tomography volume is floor-specific too
+  rt3dVolume=null; volumePlanes3d=[]; clearCloudMesh(); updateVolStatus();  // tomography volume is floor-specific too
   scheduleHeat();
   if(view==='3d') build3d();
   draw2d();

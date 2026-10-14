@@ -72,7 +72,7 @@ const planesJson = main.run(`JSON.stringify((function(){
   return { zs:zs, rx:rx, elev:elev, h:state.floors[0].height };
 })())`);
 const P = JSON.parse(planesJson);
-check(1, 'volume planes: 1..4 planes returned', P.zs.length >= 1 && P.zs.length <= 4, JSON.stringify(P.zs));
+check(1, 'volume planes: 1..8 planes returned', P.zs.length >= 1 && P.zs.length <= 8, JSON.stringify(P.zs));
 check(2, 'volume planes: receiver-height plane always included exactly',
   P.zs.some(z => z === P.rx), `rx=${P.rx} zs=${JSON.stringify(P.zs)}`);
 check(3, 'volume planes: sorted ascending',
