@@ -299,6 +299,11 @@
       <span data-i18n="toolbar.simulateCoverage">Simular cobertura</span>
     </button>
     <span id="simStatus" class="tbtn" style="font-size:10px;padding:2px 8px;opacity:0.7"></span>
+    <button class="tbtn" id="btnVolume" title="Generar tomografía de cobertura en 3D" data-i18n-title="toolbar.volumeTitle">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12L4 7.5M12 12v9" opacity=".6"/></svg>
+      <span data-i18n="toolbar.volume">Cobertura 3D</span>
+    </button>
+    <span id="volStatus" class="tbtn" style="font-size:10px;padding:2px 8px;opacity:0.7;display:none"></span>
     <button class="tbtn" id="btnTrace">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/><circle cx="12" cy="12" r="3"/></svg>
       Ray tracing
@@ -826,6 +831,16 @@ const translations = {
     "rt3d.sim.stale": "Cobertura desactualizada",
     "rt3d.sim.currentTooltip": "La simulación refleja el estado actual del proyecto",
     "rt3d.sim.staleTooltip": "El diseño cambió desde la última simulación",
+    "toolbar.volume": "Cobertura 3D",
+    "toolbar.volumeTitle": "Generar tomografía de cobertura en 3D",
+    "volume.title": "Cobertura 3D · tomografía",
+    "volume.planes": "capas",
+    "volume.done": "tomografía completa: {planes} capas, {cells} celdas",
+    "volume.cancelled": "tomografía cancelada",
+    "volume.current": "3D actualizada",
+    "volume.stale": "3D desactualizada",
+    "volume.currentTooltip": "La tomografía refleja el estado actual del proyecto",
+    "volume.staleTooltip": "El diseño cambió desde la última tomografía",
     "rt3d.audit.export": "Exportar informe Stage 6.5",
     "rt3d.audit.copy": "Copiar informe",
     "rt3d.audit.download": "Descargar .md",
@@ -1266,6 +1281,16 @@ const translations = {
     "rt3d.sim.stale": "Coverage out of date",
     "rt3d.sim.currentTooltip": "The simulation reflects the current state of the project",
     "rt3d.sim.staleTooltip": "The design changed since the last simulation",
+    "toolbar.volume": "3D Coverage",
+    "toolbar.volumeTitle": "Generate 3D coverage tomography",
+    "volume.title": "3D Coverage · tomography",
+    "volume.planes": "layers",
+    "volume.done": "tomography complete: {planes} layers, {cells} cells",
+    "volume.cancelled": "tomography cancelled",
+    "volume.current": "3D up to date",
+    "volume.stale": "3D out of date",
+    "volume.currentTooltip": "The tomography reflects the current state of the project",
+    "volume.staleTooltip": "The design changed since the last tomography",
     "rt3d.audit.export": "Export Stage 6.5 report",
     "rt3d.audit.copy": "Copy report",
     "rt3d.audit.download": "Download .md",
@@ -1706,6 +1731,16 @@ const translations = {
     "rt3d.sim.stale": "Täckning föråldrad",
     "rt3d.sim.currentTooltip": "Simuleringen speglar projektets nuvarande tillstånd",
     "rt3d.sim.staleTooltip": "Designen har ändrats sedan senaste simulering",
+    "toolbar.volume": "3D-täckning",
+    "toolbar.volumeTitle": "Generera 3D-täckningstomografi",
+    "volume.title": "3D-täckning · tomografi",
+    "volume.planes": "lager",
+    "volume.done": "tomografi klar: {planes} lager, {cells} celler",
+    "volume.cancelled": "tomografi avbruten",
+    "volume.current": "3D uppdaterad",
+    "volume.stale": "3D föråldrad",
+    "volume.currentTooltip": "Tomografin speglar projektets nuvarande tillstånd",
+    "volume.staleTooltip": "Designen har ändrats sedan senaste tomografi",
     "rt3d.audit.export": "Exportera Stage 6.5-rapport",
     "rt3d.audit.copy": "Kopiera rapport",
     "rt3d.audit.download": "Ladda ner .md",
@@ -2094,6 +2129,7 @@ function updateSimStatus(){
   el.style.background = isCurrent ? 'rgba(52,214,196,0.1)' : 'rgba(244,168,58,0.1)';
   el.style.border = isCurrent ? '1px solid #34d6c4' : '1px solid #f4a83a';
   el.style.borderRadius = '3px';
+  updateVolStatus();
 }
 
 loadWallSnapPrefs();
@@ -8852,6 +8888,8 @@ function rt3dExpRunCoverage(){
 // No ?rt3d=1 required. Progress shown via toast (existing UI).
 // ============================================================
 function runSimulateCoverage(){
+  // Supersede any in-flight tomography job; the worker serves one job.
+  if(rt3dVolumeJob){ try{ rt3dVolumeJob.cancel(); }catch(_){} rt3dVolumeJob=null; }
   // DO NOT clear previous normal product result - preserve until new COMPLETE replaces it
   // rt3dNormalActive/Canvas/Meta/Spec preserved until new COMPLETE
   const t0=performance.now();
@@ -9114,6 +9152,369 @@ function runSimulateCoverage(){
     return;
   }
   rt3dExpCovJob={ id: jobId,
+    cancel(){
+      ui.cancelled=true;
+      ui.finished=true;
+      rt3dExpWorkerCancel(jobId);
+    } };
+}
+
+// ============================================================
+//  STAGE 9A — TOMOGRAPHY PROTOTYPE (volumetric coverage layers)
+//
+//  There is still ONE RF field: Coverage(x,y,z). Every tomography sample is
+//  an exact rt3dCoverageAt() evaluation through the canonical engine — the
+//  same rt3dCoverageSlice() the authoritative 2D path uses, only sampled on
+//  several horizontal planes instead of one. No RF interpolation, no RSSI
+//  tuning, no extrusion of the 2D heatmap.
+//
+//  The 0.48 m / max-4-planes grid below is a VISUALIZATION sampling grid, not
+//  a replacement for the authoritative 0.16 m 2D slice. Each stored value is
+//  exact Coverage(x,y,z) at that cell centre at that Z. Texture filtering may
+//  interpolate between exact samples on screen but never modifies stored data.
+// ============================================================
+const RT3D_VOLUME_CELL = 0.48;        // XY visualization sampling step (m)
+const RT3D_VOLUME_MAX_PLANES = 4;     // tomography layer cap for Stage 9A
+const RT3D_VOLUME_DEDUP_M = 0.12;     // planes closer than this merge
+
+// Independent ephemeral retained volume. Never serialized, never in project
+// state or undo history — same runtime-only rule as rt3dNormal*.
+let rt3dVolume=null;       // {floorId,floorIndex,elev,spec,zs,planes,meta}
+let rt3dVolumeJob=null;    // {id,cancel} in-flight volume job handle
+let volumePlanes3d=[];     // live THREE meshes, rebuilt by refresh3dVolume()
+
+// Visualization grid: same bounds convention as rt3dGridSpec(), coarser cell.
+// Shared by ALL planes of one volume so layers align exactly in XY.
+function rt3dVolumeSpec(f){
+  const b=floorBounds(f);
+  const cell=RT3D_VOLUME_CELL;
+  const cols=clamp(Math.ceil((b.maxx-b.minx)/cell),16,460);
+  const rows=clamp(Math.ceil((b.maxy-b.miny)/cell),16,460);
+  const cw=(b.maxx-b.minx)/cols, ch=(b.maxy-b.miny)/rows;
+  return { b:b, cell:cell, cols:cols, rows:rows, cw:cw, ch:ch, raySpacing:Math.min(cw,ch) };
+}
+
+// Up to four useful absolute world-Z planes inside the active floor.
+// One plane is ALWAYS exactly floorElevation(active)+receiverHeight().
+// The rest span the usable interior with a margin from slab/ceiling.
+// Derived from floor height — no hardcoded absolute heights.
+function rt3dVolumePlanes(floorIndex){
+  const fi=(floorIndex==null)?state.activeFloor:floorIndex;
+  const f=state.floors[fi]; if(!f) return [];
+  const elev=floorElevation(fi);
+  const h=(Number.isFinite(f.height)&&f.height>0)?f.height:3.0;
+  const rx=elev+receiverHeight();
+  const margin=Math.min(0.25,Math.max(0.08,h*0.08));
+  const lo=elev+margin, hi=elev+h-margin;
+  let cands;
+  if(!(hi>lo)) cands=[rx];
+  else cands=[lo, elev+h/2, hi, rx];
+  cands.sort((a,b)=>a-b);
+  // Deduplicate: the exact receiver plane always wins a merge.
+  const out=[];
+  for(const z of cands){
+    const prev=out[out.length-1];
+    if(prev!=null && Math.abs(z-prev)<=RT3D_VOLUME_DEDUP_M){
+      if(z===rx) out[out.length-1]=rx;
+      continue;
+    }
+    out.push(z);
+  }
+  if(out.indexOf(rx)<0){
+    // Over cap: drop the non-receiver plane farthest from the receiver plane.
+    let drop=-1, best=-1;
+    for(let i=0;i<out.length;i++){
+      if(out[i]===rx) continue;
+      const d=Math.abs(out[i]-rx);
+      if(d>best){ best=d; drop=i; }
+    }
+    if(drop>=0) out.splice(drop,1);
+    out.push(rx); out.sort((a,b)=>a-b);
+  }
+  return out.slice(0,RT3D_VOLUME_MAX_PLANES);
+}
+
+// Canonical world-Z to floor-local-Y for 3D placement. A project point
+// (x,y,Z) on floor fi renders at THREE (x-cx, Z, y-cz) in root space, i.e.
+// local Y = planeZ - floorElevation(fi) inside that floor's group.
+function rt3dVolumePlaneLocalY(planeZ, floorIndex){
+  return planeZ - floorElevation(floorIndex);
+}
+
+// Volume freshness mirrors Stage 8B: the retained volume records the
+// rfRevision its snapshot was taken at, and any markRfChanged() since then
+// makes it STALE by revision comparison. Floor-gated like the 2D result.
+function rt3dVolumeFresh(){
+  if(!rt3dVolume) return false;
+  if(rt3dVolume.floorId!==floor().id) return false;
+  const simRev=rt3dVolume.meta
+    ? (rt3dVolume.meta.simulationRevision ?? rt3dVolume.meta.simulationStartRevision)
+    : null;
+  if(simRev==null) return false;
+  return (rfRevision||0)===simRev;
+}
+function updateVolStatus(){
+  const el=$('#volStatus');
+  if(!el) return;
+  if(!rt3dVolume){ el.textContent=''; el.style.display='none'; return; }
+  const fresh=rt3dVolumeFresh();
+  el.textContent=fresh?t('volume.current'):t('volume.stale');
+  el.title=fresh?t('volume.currentTooltip'):t('volume.staleTooltip');
+  el.style.display='inline-block';
+  el.style.color=fresh?'#34d6c4':'#f4a83a';
+  el.style.background=fresh?'rgba(52,214,196,0.1)':'rgba(244,168,58,0.1)';
+  el.style.border=fresh?'1px solid #34d6c4':'1px solid #f4a83a';
+  el.style.borderRadius='3px';
+}
+
+// Presentation only: exact stored best[] through the application's own
+// rssiColor(), one pixel per cell, no smoothing of any kind. Reads ONLY the
+// plane's retained array — never heatGridRssi, never heatCanvas.
+function rt3dVolumePaintPlane(spec, best){
+  const W=spec.cols, H=spec.rows;
+  const c=document.createElement('canvas');
+  c.width=W; c.height=H;
+  const cc=c.getContext('2d');
+  const img=cc.createImageData(W,H);
+  const d=img.data;
+  for(let k=0;k<W*H;k++){
+    const v=best[k], o=k*4;
+    if(!(v>-Infinity)){ d[o]=0; d[o+1]=0; d[o+2]=0; d[o+3]=0; continue; }
+    const col=rssiColor(v);
+    d[o]=col[0]; d[o+1]=col[1]; d[o+2]=col[2]; d[o+3]=col[3];
+  }
+  cc.putImageData(img,0,0);
+  return c;
+}
+
+function refresh3dVolume(){
+  for(const m of volumePlanes3d){
+    if(m.parent) m.parent.remove(m);
+    if(m.geometry) m.geometry.dispose();
+    if(m.material){ if(m.material.map) m.material.map.dispose(); m.material.dispose(); }
+  }
+  volumePlanes3d=[];
+  if(!three || !rt3dVolume) return;
+  if(rt3dVolume.floorId!==floor().id) return;   // floor-gated, like 2D
+  const spec=rt3dVolume.spec, b=spec.b;
+  const fb=floorBounds(floor());
+  const cx=(fb.minx+fb.maxx)/2, cz=(fb.miny+fb.maxy)/2;
+  // Attach inside the owning floor's group when it exists so placement uses
+  // the canonical local Y; fall back to root with absolute Z.
+  const host=(three.floorGroups && three.floorGroups[rt3dVolume.floorIndex]) || three.root;
+  const inGroup=(host!==three.root);
+  const w=b.maxx-b.minx, dd=b.maxy-b.miny;
+  for(const p of rt3dVolume.planes){
+    const canvas=rt3dVolumePaintPlane(spec, p.best);
+    const tex=new THREE.CanvasTexture(canvas); tex.needsUpdate=true;
+    tex.magFilter=THREE.LinearFilter; tex.minFilter=THREE.LinearFilter;  // display-only interpolation
+    const g=new THREE.PlaneGeometry(w,dd);
+    const m=new THREE.MeshBasicMaterial({map:tex,transparent:true,opacity:0.6,
+      depthWrite:false,side:THREE.DoubleSide});
+    const mesh=new THREE.Mesh(g,m); mesh.rotation.x=-Math.PI/2;
+    const y=inGroup ? rt3dVolumePlaneLocalY(p.planeZ, rt3dVolume.floorIndex) : p.planeZ;
+    mesh.position.set((b.minx+b.maxx)/2-cx, y, (b.miny+b.maxy)/2-cz);
+    host.add(mesh); volumePlanes3d.push(mesh);
+  }
+}
+
+// Volume worker starter. Mirrors rt3dExpWorkerStart but posts RUN_VOLUME;
+// the single Dedicated Worker supersedes any in-flight slice job.
+function rt3dExpWorkerStartVolume(snapshot, hooks){
+  const w=rt3dExpWorkerEnsure();
+  rt3dExpWorkerHooks=hooks;
+  const jobId=++rt3dExpWorkerSeq;
+  rt3dExpWorkerJobId=jobId;
+  w.postMessage({ type: RT3DCore.MSG.RUN_VOLUME, jobId: jobId,
+                  snapshot: snapshot,
+                  options: { timeBudgetMs: RT3D_COV_FRAME_MS,
+                             progressEveryCells: RT3DCore.DEFAULT_PROGRESS_EVERY_CELLS } });
+  return jobId;
+}
+
+// Minimal normal-product affordance: run the fixed 9A tomography volume.
+// Reuses the authoritative worker/phase/toast UX — not a second RF engine.
+function runVolumeCoverage(){
+  // Supersede any in-flight single-slice job; the worker serves one job.
+  if(rt3dExpCovJob){ try{ rt3dExpCovJob.cancel(); }catch(_){} rt3dExpCovJob=null; }
+  // DO NOT clear a previous valid volume — it stands until COMPLETE replaces it.
+  const t0=performance.now();
+  const simulationStartRevision=rfRevision||0;
+  const floorIndex=state.activeFloor;
+  const fl=state.floors[floorIndex];
+  const spec=rt3dVolumeSpec(fl);
+  const zs=rt3dVolumePlanes(floorIndex);
+  const ui={ phases:[], cur:'snapshot', lastT:t0, firstCellMs:null,
+             cancelled:false, finished:false, cells:0, total:spec.cols*spec.rows*zs.length,
+             cellsPerSec:null, minimized:false, planeIndex:0, numPlanes:zs.length };
+  const toastEl=$('#toast');
+  function onToastClick(e){
+    const btn=(e&&e.target&&e.target.closest)?e.target.closest('[data-action]'):null;
+    if(!btn) return;
+    const action=btn.getAttribute('data-action');
+    if(action==='minimize') ui.minimized=true;
+    else if(action==='restore') ui.minimized=false;
+    else if(action==='cancel'){
+      ui.cancelled=true;
+      if(rt3dVolumeJob) rt3dVolumeJob.cancel();
+    }
+    else return;
+    render();
+  }
+  if(toastEl) toastEl.addEventListener('click', onToastClick);
+  const phase=(next)=>{
+    const now=performance.now();
+    ui.phases.push({ name:ui.cur, ms:+(now-ui.lastT).toFixed(2) });
+    ui.cur=next; ui.lastT=now;
+    render();
+  };
+  const render=()=>{
+    const phaseLabels={ snapshot:'rt3d.cov.phase.snapshot', world:'rt3d.cov.phase.world',
+      bvh:'rt3d.cov.phase.bvh', init:'rt3d.cov.phase.init', evaluate:'rt3d.cov.phase.evaluate',
+      finalize:'rt3d.cov.phase.finalize', paint:'rt3d.cov.phase.paint' };
+    const total=Math.max(1,ui.total);
+    const frac=Math.min(1,ui.cells/total);
+    const now=performance.now();
+    const el=Math.round(now-t0);
+    const rate=(el>40&&ui.cells>0)?Math.round(ui.cells/(el/1000)):null;
+    const eta=(rate&&ui.cells>0&&ui.total>ui.cells)?Math.max(0,Math.round((ui.total-ui.cells)/rate)):null;
+    const pct=(100*frac).toFixed(1);
+    let L=[];
+    if(ui.minimized){
+      L.push('<div class="rt3dh2" style="margin:0">'+escapeHtml(t('volume.title'))+'</div>');
+      L.push('<div class="rt3dr" style="margin-bottom:4px"><span>'+escapeHtml(t('rt3d.cov.percent'))+'</span><b>'+pct+'%</b></div>');
+      L.push('<button class="tbtn" data-action="restore" style="width:100%;margin-top:6px">'+escapeHtml(t('common.restore'))+'</button>');
+    }else{
+      L.push('<div class="rt3dh2">'+escapeHtml(t('volume.title'))+'</div>');
+      L.push('<div class="rt3dr"><span>'+escapeHtml(t('rt3d.cov.percent'))+'</span><b>'+pct+'%</b></div>');
+      L.push('<progress max="1" value="'+frac+'" style="width:100%"></progress>');
+      if(ui.numPlanes>1)
+        L.push('<div class="rt3dr"><span>'+escapeHtml(t('volume.planes'))+'</span><b>'+
+          Math.min(ui.planeIndex+1,ui.numPlanes)+' / '+ui.numPlanes+'</b></div>');
+      if(ui.cur==='evaluate'){
+        L.push('<div class="rt3dr"><span>'+escapeHtml(t('rt3d.cov.progress'))+'</span><b>'+
+          ui.cells.toLocaleString()+' / '+ui.total.toLocaleString()+'</b></div>');
+        if(rate) L.push('<div class="rt3dr"><span>'+escapeHtml(t('rt3d.cov.rate'))+'</span><b>'+
+          rate.toLocaleString()+' '+t('rt3d.cov.rateUnit')+'</b></div>');
+        L.push('<div class="rt3dr"><span>'+escapeHtml(t('rt3d.cov.elapsed'))+'</span><b>'+
+          (el>=1000?(el/1000).toFixed(1)+' s':el+' ms')+'</b></div>');
+        if(eta!=null) L.push('<div class="rt3dr"><span>'+escapeHtml(t('rt3d.cov.eta'))+'</span><b>'+
+          (eta>=60?Math.round(eta/60)+' min':eta+' s')+'</b></div>');
+      }
+      const allPhases=['snapshot','world','bvh','init','evaluate','finalize','paint'];
+      L.push('<div class="rt3dn" style="margin-top:4px;font-size:10px">');
+      for(const pn of allPhases){
+        const done=ui.phases.some(p=>p.name===pn);
+        const current=ui.cur===pn;
+        const icon=done?'✓':(current?'●':'○');
+        L.push('<div style="margin:1px 0"><span style="color:'+
+          (current?'#34d6c4':(done?'#34d6c4':'#7d8a9c'))+'">'+icon+'</span> '+escapeHtml(t(phaseLabels[pn]||pn))+'</div>');
+      }
+      L.push('</div>');
+      if(!ui.finished&&!ui.cancelled){
+        L.push('<div style="display:flex;gap:6px;margin-top:8px">');
+        if(!ui.minimized)
+          L.push('<button class="tbtn" data-action="minimize" style="flex:1">'+escapeHtml(t('common.minimize'))+'</button>');
+        L.push('<button class="tbtn" data-action="cancel" style="flex:1;background:rgba(239,95,95,.1);border-color:rgba(239,95,95,.5);color:#ef5f5f">'+
+          escapeHtml(t('common.cancel'))+'</button>');
+        L.push('</div>');
+      }else if(ui.cancelled){
+        L.push('<div class="rt3dwarn" style="margin-top:8px">'+escapeHtml(t('volume.cancelled'))+'</div>');
+      }
+    }
+    showToast(true,{html:L.join('')});
+  };
+  render();
+
+  const snapshot={
+    state: JSON.parse(JSON.stringify(state, (k,v)=> (k==='_img'||k==='rfRevision'||k==='simulationRevision'||k==='simulationStartRevision'||k==='isCurrent') ? undefined : v)),
+    floorIndex: floorIndex,
+    spec: spec,
+    zs: zs
+  };
+
+  phase('world');
+  phase('bvh');
+  phase('init');
+  phase('evaluate');
+
+  const publish=(payload)=>{
+    phase('paint');
+    // The worker computed the snapshot taken at simulationStartRevision, so a
+    // mid-run edit publishes STALE by revision comparison (Stage 8B rule).
+    const simulationRevision=simulationStartRevision;
+    rt3dVolume={
+      floorId: fl.id, floorIndex: floorIndex, elev: floorElevation(floorIndex),
+      spec: payload.spec, zs: payload.planeZs.slice(),
+      planes: payload.planes.map(p=>({ planeZ:p.planeZ, best:p.grid.best,
+        apBest:p.grid.apBest, valid:p.grid.valid,
+        evaluatedCells:p.evaluatedCells, validCells:p.validCells,
+        noSignalCells:p.noSignalCells, diagnostics:p.diagnostics })),
+      meta: { simulationRevision:simulationRevision,
+              simulationStartRevision:simulationStartRevision,
+              sources:payload.sources }
+    };
+    ui.finished=true;
+    showToast(false,{html:
+      '<div class="rt3dh2">'+escapeHtml(t('volume.title'))+'</div>'+
+      '<div class="rt3dn">'+escapeHtml(t('volume.done',{planes:payload.planes.length,
+        cells:payload.evaluatedCells}))+'</div>'
+    });
+    updateVolStatus();
+    if(view==='3d') refresh3dVolume();
+  };
+  const abort=()=>{
+    ui.finished=true;
+    if(toastEl) toastEl.removeEventListener('click', onToastClick);
+    // Deliberately NO publish: the last valid volume stays on screen.
+    showToast(false,{html:
+      '<div class="rt3dwarn"><b>'+escapeHtml(t('volume.cancelled'))+'</b><br>'+
+      escapeHtml(t('rt3d.cov.cancelledKeep'))+'</div>'
+    });
+  };
+  const workerError=(message)=>{
+    ui.finished=true;
+    if(toastEl) toastEl.removeEventListener('click', onToastClick);
+    showToast(false,{html:
+      '<div class="rt3dwarn"><b>'+escapeHtml(t('rt3d.cov.workerError'))+'</b><br>'+
+      escapeHtml(message)+'<br>'+escapeHtml(t('rt3d.cov.cancelledKeep'))+'</div>'
+    });
+  };
+  const finish=(payload)=>{
+    phase('finalize');
+    if(toastEl) toastEl.removeEventListener('click', onToastClick);
+    publish(payload);
+  };
+
+  let jobId;
+  try{
+    jobId=rt3dExpWorkerStartVolume(snapshot,{
+      onProgress:(m)=>{
+        if(rt3dVolumeJob&&rt3dVolumeJob.id!==m.jobId) return;
+        ui.cells=m.evaluatedCells;
+        if(m.numPlanes) { ui.planeIndex=m.planeIndex||0; ui.numPlanes=m.numPlanes; }
+        if(ui.firstCellMs===null&&m.evaluatedCells>0)
+          ui.firstCellMs=+(performance.now()-t0).toFixed(1);
+        render();
+      },
+      onComplete:(m)=>{
+        if(rt3dVolumeJob&&rt3dVolumeJob.id!==m.jobId) return;
+        finish(m);
+      },
+      onCancelled:(m)=>{
+        if(rt3dVolumeJob&&rt3dVolumeJob.id!==m.jobId) return;
+        abort();
+      },
+      onError:(m)=>{
+        if(rt3dVolumeJob&&rt3dVolumeJob.id!==m.jobId) return;
+        workerError(m.message);
+      }
+    });
+  }catch(err){
+    workerError(String(err&&err.message?err.message:err));
+    return;
+  }
+  rt3dVolumeJob={ id:jobId,
     cancel(){
       ui.cancelled=true;
       ui.finished=true;
@@ -15025,6 +15426,7 @@ function build3d(){
   if(!three)return;
   const root=three.root;
   while(root.children.length) root.remove(root.children[0]);
+  three.floorGroups={};
 
   // center model around active-floor bounds
   const fb=floorBounds(floor());
@@ -15241,8 +15643,10 @@ function build3d(){
     });
 
     root.add(fl);
+    three.floorGroups[idx]=fl;
   });
   refresh3dHeat();
+  refresh3dVolume();
 }
 let heatPlane=null;
 function refresh3dHeat(){
@@ -15343,6 +15747,7 @@ function setActiveFloor(i){
   state.activeFloor=i; select(null); buildFloors(); updateChips(); syncFloorPanel();
   clearFootprintDiagnostics();   // the markers belong to the floor you left
   rt3dNormalActive=false; rt3dNormalCanvas=null; rt3dNormalMeta=null; rt3dNormalSpec=null;  // normal RT3D result is floor-specific
+  rt3dVolume=null; volumePlanes3d=[]; updateVolStatus();  // tomography volume is floor-specific too
   scheduleHeat();
   if(view==='3d') build3d();
   draw2d();
@@ -17570,6 +17975,7 @@ function wireGlobals(){
     $('#legend').classList.toggle('off',!showHeat); if(showHeat)scheduleHeat(); else {heatCanvas=null;draw2d();if(view==='3d')refresh3dHeat();} };
   $('#btnTrace').onclick=()=>{ runRayTrace(()=>{}); };
   $('#btnSimulate').onclick=runSimulateCoverage;
+  $('#btnVolume').onclick=runVolumeCoverage;
   $('#btnSave').onclick=saveProject;
   $('#btnLoad').onclick=()=>$('#fileLoad').click();
   $('#fileLoad').onchange=e=>{ if(e.target.files[0])loadProject(e.target.files[0]); e.target.value=''; };

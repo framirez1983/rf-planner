@@ -60,7 +60,8 @@
   //  recognisable because their id is stale.
   // ------------------------------------------------------------
   var MSG = {
-    RUN_SLICE: 'RUN_SLICE',   // main -> worker
+    RUN_SLICE: 'RUN_SLICE',   // main -> worker (one planeZ)
+    RUN_VOLUME: 'RUN_VOLUME',  // main -> worker (N planeZs, one world/BVH build)
     CANCEL:    'CANCEL',      // main -> worker
     PROGRESS:  'PROGRESS',    // worker -> main
     COMPLETE:  'COMPLETE',    // worker -> main
@@ -292,6 +293,131 @@
           // canonical function. Never re-implemented on this side.
           var sources = env.run('rt3dCoverageSources()');
           job.snapshot.sources = sources;
+
+          // --- Stage 9A volume path -------------------------------------
+          // A RUN_VOLUME snapshot carries `zs` (absolute world-Z planes) and a
+          // single shared `spec`. World, BVH and sources are built ONCE above
+          // and reused for every plane; each plane is evaluated by the SAME
+          // rt3dCoverageSlice() call the single-slice path uses, with its own
+          // resumable cursor and stats. No RF math lives here: this is only
+          // scheduling around the canonical engine function.
+          var volZs = (job.snapshot.zs && job.snapshot.zs.length)
+            ? job.snapshot.zs.slice() : null;
+          if (volZs) {
+            job.snapshot.backend = opts.backend || 'bvh';
+            job.snapshot.chunkMs = chunkMs;
+            job.snapshot.cursors = volZs.map(function () {
+              return { j: 0, i: 0, best: null, apBest: null, valid: null, acc: null };
+            });
+            job.snapshot.statsArr = volZs.map(function () { return env.run('rt3dNewStats()'); });
+            job.snapshot.planeIndex = 0;
+            job.snapshot.planeResults = [];
+            var volN = job.snapshot.spec.cols * job.snapshot.spec.rows;
+            var volTotal = volN * volZs.length;
+            var volReported = 0;
+            var runVolumeChunk = function () {
+              if (isStale()) { reportCancelled(); return; }
+              try {
+                var pi = job.snapshot.planeIndex;
+                job.snapshot.cursor = job.snapshot.cursors[pi];
+                job.snapshot.stats = job.snapshot.statsArr[pi];
+                job.snapshot.planeZ = volZs[pi];
+                var volSlice = env.run(
+                  'rt3dCoverageSlice(__RT3D_JOB__.world, __RT3D_JOB__.spec, __RT3D_JOB__.planeZ, {' +
+                  '  cursor: __RT3D_JOB__.cursor, stats: __RT3D_JOB__.stats,' +
+                  '  sources: __RT3D_JOB__.sources, backend: __RT3D_JOB__.backend,' +
+                  '  timeBudgetMs: __RT3D_JOB__.chunkMs })');
+
+                var volDone = pi * volN + volSlice.evaluatedCells;
+                if (volDone - volReported >= progressEvery) {
+                  volReported = volDone;
+                  emit({
+                    type: MSG.PROGRESS, jobId: jobId,
+                    evaluatedCells: volDone,
+                    totalCells: volTotal,
+                    percent: volTotal ? volDone / volTotal : 1,
+                    planeIndex: pi, numPlanes: volZs.length,
+                    planeZ: volZs[pi]
+                  });
+                }
+
+                if (!volSlice.complete) {
+                  if (cancelled) { reportCancelled(); return; }
+                  yieldNow(runVolumeChunk);
+                  return;
+                }
+
+                job.snapshot.planeResults.push(volSlice);
+                job.snapshot.planeIndex = pi + 1;
+                if (pi + 1 < volZs.length) {
+                  if (cancelled) { reportCancelled(); return; }
+                  yieldNow(runVolumeChunk);
+                  return;
+                }
+
+                // All planes complete: build the transferable payload.
+                var volTransfer = [];
+                var volPlanes = job.snapshot.planeResults.map(function (sr) {
+                  volTransfer.push(sr.best.buffer, sr.apBest.buffer, sr.valid.buffer);
+                  var sd = sr.diagnostics;
+                  return {
+                    planeZ: sr.planeZ,
+                    evaluatedCells: sr.evaluatedCells,
+                    validCells: sr.validCells,
+                    noSignalCells: sr.noSignalCells,
+                    complete: sr.complete,
+                    grid: { best: sr.best, apBest: sr.apBest, valid: sr.valid },
+                    diagnostics: {
+                      receiverPlaneZ: sd.receiverPlaneZ,
+                      cellsEvaluated: sd.cellsEvaluated,
+                      participatingAps: sd.participatingAps,
+                      ownerFloors: sd.ownerFloors,
+                      directPathsTested: sd.directPathsTested,
+                      validReflectedPaths: sd.validReflectedPaths,
+                      worldBodies: sd.worldBodies,
+                      bvhNodes: bvh && bvh.nodeCount != null ? bvh.nodeCount : 0,
+                      bvhCandidatesTested: sd.bvhCandidatesTested,
+                      sliceTotalMs: sd.totalMs,
+                      rasterRule: sd.rasterRule,
+                      aggregationRule: sd.aggregationRule,
+                      antennaModel: sd.antennaModel,
+                      aggregationNote: sd.aggregationNote
+                    }
+                  };
+                });
+                var volPayload = {
+                  type: MSG.COMPLETE,
+                  jobId: jobId,
+                  volume: true,
+                  spec: {
+                    cols: job.snapshot.spec.cols, rows: job.snapshot.spec.rows,
+                    cell: job.snapshot.spec.cell, cw: job.snapshot.spec.cw, ch: job.snapshot.spec.ch,
+                    raySpacing: job.snapshot.spec.raySpacing,
+                    b: { minx: job.snapshot.spec.b.minx, miny: job.snapshot.spec.b.miny,
+                         maxx: job.snapshot.spec.b.maxx, maxy: job.snapshot.spec.b.maxy }
+                  },
+                  planeZs: volZs.slice(),
+                  planes: volPlanes,
+                  evaluatedCells: volTotal,
+                  totalCells: volTotal,
+                  sources: JSON.parse(JSON.stringify(sources.map(function (s) {
+                    return { apId: s.ap.id, apName: s.ap.name || '', floorIndex: s.floorIndex };
+                  })))
+                };
+
+                finished = true;
+                emit(volPayload, volTransfer);
+              } catch (err) {
+                finished = true;
+                emit({ type: MSG.ERROR, jobId: jobId,
+                       message: String(err && err.message ? err.message : err) });
+              }
+            };
+
+            yieldNow(runVolumeChunk);
+            return;
+          }
+
           var stats = env.run('rt3dNewStats()');
           job.snapshot.stats = stats;
           var cursor = { j: 0, i: 0, best: null, apBest: null, valid: null, acc: null };
@@ -458,7 +584,7 @@
                message: loaded ? null : 'engine not loaded in worker scope' });
         return;
       }
-      if (msg.type === MSG.RUN_SLICE) {
+      if (msg.type === MSG.RUN_SLICE || msg.type === MSG.RUN_VOLUME) {
         // A new job supersedes whatever was running. The old handle is
         // cancelled so its in-flight chunk stops at the next yield.
         if (current) current.cancel();

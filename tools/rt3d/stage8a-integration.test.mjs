@@ -140,13 +140,21 @@ assert(abortSection2.includes('removeEventListener'), 'abort() removes delegated
 const errSection = runSimSection.substring(runSimSection.indexOf('const workerError='), runSimSection.indexOf('const workerError=') + 400);
 assert(errSection.includes('removeEventListener'), 'workerError() removes delegated listener');
 
-// 20. No listener accumulation across renders or runs
+// 20. No listener accumulation across renders or runs. Each run path (the
+// single-slice simulation and the Stage 9A tomography volume) attaches its
+// delegated #toast listener exactly once and removes it on every terminal
+// path — the same invariant, per run function rather than file-global.
 const onToastClickCount = (html.match(/onToastClick\)/g) || []).length;
-assert(onToastClickCount >= 4, `one attach + three removes (found ${onToastClickCount})`);
-const addCount = (html.match(/toastEl\.addEventListener/g) || []).length;
-const remCount = (html.match(/toastEl\.removeEventListener/g) || []).length;
-assert(addCount === 1, `exactly one addEventListener call (found ${addCount})`);
-assert(remCount === 3, `exactly three removeEventListener calls (found ${remCount})`);
+assert(onToastClickCount >= 8, `one attach + three removes per run path (found ${onToastClickCount})`);
+const volSection = html.substring(html.indexOf('function runVolumeCoverage'), html.indexOf('const RT3D_AUDIT_TRUTH_HIERARCHY'));
+const simAdd = (runSimSection.match(/toastEl\.addEventListener/g) || []).length;
+const simRem = (runSimSection.match(/toastEl\.removeEventListener/g) || []).length;
+const volAdd = (volSection.match(/toastEl\.addEventListener/g) || []).length;
+const volRem = (volSection.match(/toastEl\.removeEventListener/g) || []).length;
+assert(simAdd === 1, `slice path: exactly one addEventListener call (found ${simAdd})`);
+assert(simRem === 3, `slice path: exactly three removeEventListener calls (found ${simRem})`);
+assert(volAdd === 1, `volume path: exactly one addEventListener call (found ${volAdd})`);
+assert(volRem === 3, `volume path: exactly three removeEventListener calls (found ${volRem})`);
 
 // 21. Cancel calls canonical worker cancel exactly once
 const cancelCalls = (runSimSection.match(/rt3dExpCovJob\.cancel\(\)/g) || []).length;
@@ -154,9 +162,10 @@ assert(cancelCalls === 1, `cancel invokes rt3dExpCovJob.cancel() exactly once (f
 assert(runSimSection.includes('rt3dExpWorkerCancel'), 'cancels via canonical worker cancel');
 assert(runSimSection.includes('rt3dExpWorkerCancel(jobId)'), 'worker cancel scoped to jobId');
 
-// 22. Minimize/Restore must NOT touch Worker execution
+// 22. Minimize/Restore must NOT touch Worker execution (one minimize +
+// restore line per delegated handler: slice path and volume path)
 const minimizeLines = html.split('\n').filter(l => l.includes("action==='minimize'") || l.includes("action==='restore'"));
-assert(minimizeLines.length === 2, 'minimize and restore handled in delegated handler');
+assert(minimizeLines.length === 4, 'minimize and restore handled in delegated handlers');
 for (const line of minimizeLines) assertNot(line.includes('cancel') || line.includes('Worker'), 'minimize/restore does not touch Worker');
 
 // 23. Progress re-render safety: render() re-paints the card every PROGRESS event

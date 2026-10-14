@@ -107,7 +107,7 @@ self.onmessage = function (ev) {
     return;
   }
 
-  if (msg.type !== RT3DCore.MSG.RUN_SLICE) return;
+  if (msg.type !== RT3DCore.MSG.RUN_SLICE && msg.type !== RT3DCore.MSG.RUN_VOLUME) return;
   if (failed) { self.postMessage({ type: RT3DCore.MSG.ERROR, jobId: msg.jobId, message: failed }); return; }
   if (runtime) { runtime.handle(msg); return; }
   pending.push(msg);
