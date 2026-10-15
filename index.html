@@ -261,6 +261,11 @@
     margin-top:6px;border-left:2px solid #ffb454;padding-left:6px}
   #rt3dExpPanel hr{border:0;border-top:1px solid #2a3542;margin:6px 0}
   #rt3dExpPanel progress{width:100%;height:6px}
+  /* Stage 10A: internal architecture hidden from the normal product UI.
+     Cobertura 3D / Ray tracing buttons and the CURRENT/STALE chips stay
+     fully functional for dev/console/audit use; they are simply not shown.
+     !important wins over the inline display styles the status writers set. */
+  #btnVolume,#btnTrace,#simStatus,#volStatus{display:none!important;}
 </style>
 </head>
 <body>
@@ -290,9 +295,9 @@
     <select id="uiLanguage" class="tbtn" aria-label="Idioma" data-i18n-aria-label="language.label" title="Idioma" data-i18n-title="language.label">
       <option value="es">Español</option><option value="en">English</option><option value="sv">Svenska</option>
     </select>
-    <button class="tbtn" id="btnHeat" title="Visa/dölj täckning" data-i18n-title="toolbar.toggleCoverage">
+    <button class="tbtn" id="btnHeat" title="Mostrar/ocultar vista previa" data-i18n-title="toolbar.previewTitle">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18" opacity=".5"/></svg>
-      <span data-i18n="toolbar.coverage">Täckning</span>
+      <span id="btnHeatLabel" data-i18n="toolbar.preview">Vista previa</span>
     </button>
     <button class="tbtn primary" id="btnSimulate" title="Ejecutar simulación de cobertura RT3D autoritativa" data-i18n-title="toolbar.simulateCoverageTitle">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20"/><path d="M12 6v6l4 2"/></svg>
@@ -492,6 +497,10 @@ const translations = {
     "toolbar.redo": "Rehacer (Ctrl/Cmd+Shift+Z)",
     "toolbar.toggleCoverage": "Mostrar/ocultar cobertura",
     "toolbar.coverage": "Cobertura",
+    "toolbar.preview": "Vista previa",
+    "toolbar.previewTitle": "Mostrar/ocultar vista previa",
+    "toolbar.showCoverage": "Mostrar cobertura",
+    "toolbar.showCoverageTitle": "Mostrar/ocultar cobertura autoritativa",
     "toolbar.simulateCoverage": "Simular cobertura",
     "toolbar.simulateCoverageTitle": "Ejecutar simulación de cobertura RT3D autoritativa",
     "toolbar.saveProject": "Guardar proyecto",
@@ -943,6 +952,10 @@ const translations = {
     "toolbar.redo": "Redo (Ctrl/Cmd+Shift+Z)",
     "toolbar.toggleCoverage": "Show/hide coverage",
     "toolbar.coverage": "Coverage",
+    "toolbar.preview": "Preview",
+    "toolbar.previewTitle": "Toggle preview",
+    "toolbar.showCoverage": "Show coverage",
+    "toolbar.showCoverageTitle": "Toggle authoritative coverage",
     "toolbar.simulateCoverage": "Simulate Coverage",
     "toolbar.simulateCoverageTitle": "Run authoritative RT3D coverage simulation",
     "toolbar.saveProject": "Save project",
@@ -1394,6 +1407,10 @@ const translations = {
     "toolbar.redo": "Gör om (Ctrl/Cmd+Shift+Z)",
     "toolbar.toggleCoverage": "Visa/dölj täckning",
     "toolbar.coverage": "Täckning",
+    "toolbar.preview": "Förhandsvisning",
+    "toolbar.previewTitle": "Visa/dölj förhandsvisning",
+    "toolbar.showCoverage": "Visa täckning",
+    "toolbar.showCoverageTitle": "Visa/dölj auktoritativ täckning",
     "toolbar.simulateCoverage": "Simulera täckning",
     "toolbar.simulateCoverageTitle": "Kör auktoritativ RT3D-täckningssimulering",
     "toolbar.saveProject": "Spara projekt",
@@ -2108,7 +2125,61 @@ let rfRevision = 0;
 let simulationRevision = null;
 function markRfChanged(){
   rfRevision = (rfRevision||0) + 1;
+  invalidateAuthoritative();
   updateSimStatus();
+}
+// Stage 10A invalidation: any RF-relevant mutation discards the authoritative
+// product completely -- no stale heatmaps, no stale clouds, no STALE badge.
+// The fast preview fills the design-feedback role from here on. Visibility
+// intent is preserved: an ON authoritative result becomes an ON preview, an
+// OFF one stays OFF, so a clean plan used for editing is never relit.
+// Redraws ride on the callers' existing scheduleHeat/draw2d/build3d pattern;
+// the cheap mesh sync below only guarantees no stale volume survives in 3D.
+function invalidateAuthoritative(){
+  if(productState==='SIMULATING'){
+    authRunId++;   // staged completions from the old run can no longer commit
+    if(rt3dExpCovJob){ try{rt3dExpCovJob.cancel();}catch(_){} }
+    if(rt3dVolumeJob){ try{rt3dVolumeJob.cancel();}catch(_){} }
+  }
+  if(productState==='SIMULATED'||productState==='SIMULATING'){
+    if(showAuthoritative) showHeat=true;
+    showAuthoritative=true;
+  }
+  productState='DESIGN';
+  rt3dNormalActive=false; rt3dNormalCanvas=null; rt3dNormalMeta=null; rt3dNormalSpec=null;
+  rt3dVolume=null; clearCloudMesh(); clearVolumeSheets();
+  if(typeof three!=='undefined'&&three) refresh3dHeat();
+  scheduleHeat();
+  updateCoverageToggle();
+}
+// Single coverage toggle (Stage 10A): Vista previa in DESIGN, Mostrar
+// cobertura in SIMULATED. DOM access is guarded so headless harnesses and
+// early calls never throw.
+function updateCoverageToggle(){
+  const b=(typeof $!=='undefined')?$('#btnHeat'):null;
+  if(!b||!b.classList) return;
+  const simulated=(productState==='SIMULATED');
+  const vis=simulated?showAuthoritative:showHeat;
+  const label=(b.querySelector)?b.querySelector('span'):null;
+  if(label&&label.dataset!==undefined) setUiText(label,simulated?'toolbar.showCoverage':'toolbar.preview');
+  b.classList.toggle('primary',!!vis);
+  if(b.dataset!==undefined){
+    b.dataset.i18nTitle=simulated?'toolbar.showCoverageTitle':'toolbar.previewTitle';
+    try{ b.title=t(simulated?'toolbar.showCoverageTitle':'toolbar.previewTitle'); }catch(_){}
+  }
+  const lg=(typeof $!=='undefined')?$('#legend'):null;
+  if(lg&&lg.classList) lg.classList.toggle('off',!vis);
+}
+function onCoverageToggle(){
+  if(productState==='SIMULATING') return;   // one job in flight: toggle waits
+  if(productState==='SIMULATED'){
+    showAuthoritative=!showAuthoritative;
+    updateCoverageToggle(); draw2d(); if(view==='3d')build3d();
+  }else{
+    showHeat=!showHeat;
+    updateCoverageToggle();
+    if(showHeat)scheduleHeat(); else {heatCanvas=null;draw2d();if(view==='3d')refresh3dHeat();}
+  }
 }
 
 // Update simulation freshness status indicator.
@@ -2234,6 +2305,17 @@ function makeAP(x,y,name, floorHeight){
 let tool='select';      // select | wall | pillar | ap | label | rack | cable | opening | bg | erase | measure
 let view='2d';
 let showHeat=true;
+// ---------- Stage 10A unified coverage product state (runtime-only) ----------
+// DESIGN:     no valid authoritative result; toggle = Vista previa (fast preview).
+// SIMULATING: one authoritative job in flight; preview hidden; no new result shown.
+// SIMULATED:  authoritative 2D+3D valid; toggle = Mostrar cobertura.
+// Never serialized, never in project JSON or undo history. The two renderers
+// (fast preview vs authoritative) are mutually exclusive by construction:
+// every paint path consults authVisible() instead of trusting either flag.
+let productState='DESIGN';
+let showAuthoritative=true;   // visibility intent for the authoritative result
+let authRunId=0;              // orchestrator generation; staged commits check it
+function authVisible(){ return productState==='SIMULATED' && showAuthoritative; }
 let selection=null;     // {type:'ap'|'wall'|'pillar'|'label'|'rack'|'cable'|'opening'|'bg', id?}
 let heatMode='simple';  // 'simple' | 'trace'
 let calibState=null;    // {p1,p2,awaitDist} during background-image scale calibration
@@ -2556,8 +2638,8 @@ function draw2d(){
     }
   }
 
-  // heatmap underlay
-  if(showHeat && heatCanvas && heatMeta && heatMeta.floorId===f.id){
+  // heatmap underlay (Stage 10A: fast Vista previa only, never under authoritative)
+  if(productState==='DESIGN' && showHeat && heatCanvas && heatMeta && heatMeta.floorId===f.id){
     const a=W2S(heatMeta.minx,heatMeta.miny), b=W2S(heatMeta.maxx,heatMeta.maxy);
     ctx.save(); ctx.globalAlpha=0.62; ctx.imageSmoothingEnabled=(Number(editorPrefs.heatmapSmoothing)||0)>0;
     ctx.drawImage(heatCanvas, a.x, a.y, b.x-a.x, b.y-a.y);
@@ -2593,7 +2675,9 @@ function draw2d(){
   // RT3D normal-product underlay (Stage 8A). Independent of ?rt3d=1 flag.
   // Displays the authoritative RT3D Coverage Field result from the normal workflow.
   // Painted from its own canvas with smoothing ON for presentation (no RF data change).
-  if(rt3dNormalActive && rt3dNormalCanvas && rt3dNormalMeta && rt3dNormalMeta.floorId===f.id){
+  // Stage 10A: only while the authoritative result is visible (never stale: an
+  // RF edit discards it instead of badging it).
+  if(authVisible() && rt3dNormalActive && rt3dNormalCanvas && rt3dNormalMeta && rt3dNormalMeta.floorId===f.id){
     const a=W2S(rt3dNormalMeta.minx,rt3dNormalMeta.miny), b=W2S(rt3dNormalMeta.maxx,rt3dNormalMeta.maxy);
     ctx.save(); ctx.globalAlpha=0.62; ctx.imageSmoothingEnabled=true;
     ctx.drawImage(rt3dNormalCanvas, a.x, a.y, b.x-a.x, b.y-a.y);
@@ -8890,13 +8974,17 @@ function rt3dExpRunCoverage(){
 //  Reuses the exact same Worker pipeline as the experimental path.
 // No ?rt3d=1 required. Progress shown via toast (existing UI).
 // ============================================================
-function runSimulateCoverage(){
+function runSimulateCoverage(opts){
+  // Stage 10A: optional orchestrated mode shares one snapshot/revision across
+  // the 2D+3D pipelines and chains stages. RF math and worker calls are
+  // identical in both modes.
+  opts=opts||{};
   // Supersede any in-flight tomography job; the worker serves one job.
   if(rt3dVolumeJob){ try{ rt3dVolumeJob.cancel(); }catch(_){} rt3dVolumeJob=null; }
   // DO NOT clear previous normal product result - preserve until new COMPLETE replaces it
   // rt3dNormalActive/Canvas/Meta/Spec preserved until new COMPLETE
   const t0=performance.now();
-  const simulationStartRevision = rfRevision || 0;
+  const simulationStartRevision = opts.simulationStartRevision!=null?opts.simulationStartRevision:(rfRevision || 0);
   const ui={ phases:[], cur:'snapshot', lastT:t0, firstCellMs:null,
              cancelled:false, finished:false, cells:0, total:0, cellsPerSec:null,
              minimized:false };
@@ -9018,9 +9106,10 @@ function runSimulateCoverage(){
   const planeZ=rt3dReceiverPlaneZForFloor(floorIndex);
   ui.total=spec.cols*spec.rows;
 
-  // ---- snapshot: the project as it is RIGHT NOW --------------------------
+  // ---- snapshot: the project as it is RIGHT NOW (or the orchestrator's
+  // shared snapshot, so 2D+3D outputs correspond to the same design) -------
   const snapshot = {
-    state: JSON.parse(JSON.stringify(state, (k,v)=> (k==='_img'||k==='rfRevision'||k==='simulationRevision'||k==='simulationStartRevision'||k==='isCurrent') ? undefined : v)),
+    state: opts.snapshotState || JSON.parse(JSON.stringify(state, (k,v)=> (k==='_img'||k==='rfRevision'||k==='simulationRevision'||k==='simulationStartRevision'||k==='isCurrent') ? undefined : v)),
     floorIndex: floorIndex,
     spec: spec,
     planeZ: planeZ,
@@ -9035,6 +9124,10 @@ function runSimulateCoverage(){
 
   const publish=(out, col)=>{
     phase('paint');
+    // Stage 10A: a superseded run or a mid-run RF edit must never publish.
+    if(opts.runId!=null&&(opts.runId!==authRunId||(rfRevision||0)!==simulationStartRevision)){
+      ui.finished=true; return;
+    }
     // The Worker computed the snapshot taken at simulationStartRevision, so the
     // published field corresponds to the START revision, not the revision at
     // COMPLETE time. If the user mutated RF state mid-simulation, rfRevision has
@@ -9068,6 +9161,13 @@ function runSimulateCoverage(){
     });
     updateSimStatus();
     draw2d(); if(view==='3d')refresh3dHeat();
+    // Stage 10A: orchestrated runs chain into the volume stage instead of stopping here.
+    if(opts.onDone) opts.onDone(out, col);
+    // Direct (dev/console) runs keep the old behavior: a finished result
+    // becomes the visible authoritative product.
+    if(!opts.staged && productState!=='SIMULATING'){
+      productState='SIMULATED'; showAuthoritative=true; updateCoverageToggle();
+    }
   };
 
   const abort=()=>{
@@ -9084,6 +9184,7 @@ function runSimulateCoverage(){
         escapeHtml(rt3dExpLastResult.floorName)+' (Z '+
         rt3dExpLastResult.receiverPlaneZ.toFixed(2)+' m)</div>'):'')
     });
+    if(opts.onAbort) opts.onAbort();
   };
 
   const workerError=(message)=>{
@@ -9097,6 +9198,7 @@ function runSimulateCoverage(){
         escapeHtml(rt3dExpLastResult.floorName)+' (Z '+
         rt3dExpLastResult.receiverPlaneZ.toFixed(2)+' m)</div>'):'')
     });
+    if(opts.onAbort) opts.onAbort(message);
   };
 
   const finish=(payload)=>{
@@ -9435,6 +9537,8 @@ function clearVolumeSheets(){
 }
 function refresh3dVolume(){
   clearVolumeSheets();
+  // Stage 10A: sheets render only while the authoritative result is visible.
+  if(!authVisible()) return;
   if(!three || !rt3dVolume || !rt3dVolume.floors) return;
   const fb=floorBounds(floor());
   const cx=(fb.minx+fb.maxx)/2, cz=(fb.miny+fb.maxy)/2;
@@ -9480,12 +9584,14 @@ function rt3dExpWorkerStartVolume(snapshot, hooks){
 
 // Minimal normal-product affordance: run the fixed 9A tomography volume.
 // Reuses the authoritative worker/phase/toast UX — not a second RF engine.
-function runVolumeCoverage(){
+function runVolumeCoverage(opts){
+  // Stage 10A: optional orchestrated mode (see runSimulateCoverage).
+  opts=opts||{};
   // Supersede any in-flight single-slice job; the worker serves one job.
   if(rt3dExpCovJob){ try{ rt3dExpCovJob.cancel(); }catch(_){} rt3dExpCovJob=null; }
   // DO NOT clear a previous valid volume — it stands until COMPLETE replaces it.
   const t0=performance.now();
-  const simulationStartRevision=rfRevision||0;
+  const simulationStartRevision=opts.simulationStartRevision!=null?opts.simulationStartRevision:(rfRevision||0);
   const floorIndex=state.activeFloor;
   // One multi-floor run covers floors 0..activeFloor (the 3D cutaway rule).
   const reqFloors=rt3dVolumeRequestFloors(floorIndex);
@@ -9578,7 +9684,7 @@ function runVolumeCoverage(){
   render();
 
   const snapshot={
-    state: JSON.parse(JSON.stringify(state, (k,v)=> (k==='_img'||k==='rfRevision'||k==='simulationRevision'||k==='simulationStartRevision'||k==='isCurrent') ? undefined : v)),
+    state: opts.snapshotState || JSON.parse(JSON.stringify(state, (k,v)=> (k==='_img'||k==='rfRevision'||k==='simulationRevision'||k==='simulationStartRevision'||k==='isCurrent') ? undefined : v)),
     activeFloorIndex: floorIndex,
     floors: reqFloors
   };
@@ -9590,6 +9696,10 @@ function runVolumeCoverage(){
 
   const publish=(payload)=>{
     phase('paint');
+    // Stage 10A: a superseded run or a mid-run RF edit must never publish.
+    if(opts.runId!=null&&(opts.runId!==authRunId||(rfRevision||0)!==simulationStartRevision)){
+      ui.finished=true; return;
+    }
     // The worker computed the snapshot taken at simulationStartRevision, so a
     // mid-run edit publishes STALE by revision comparison (Stage 8B rule).
     // Floor ids are the launch-time ones: a floor added/removed mid-run must
@@ -9621,6 +9731,13 @@ function runVolumeCoverage(){
     });
     updateVolStatus();
     if(view==='3d') update3dVolumeView();
+    // Stage 10A: orchestrated runs chain into the product commit instead.
+    if(opts.onDone) opts.onDone(payload);
+    // Direct (dev/console) runs keep the old behavior: a finished result
+    // becomes the visible authoritative product.
+    if(!opts.staged && productState!=='SIMULATING'){
+      productState='SIMULATED'; showAuthoritative=true; updateCoverageToggle();
+    }
   };
   const abort=()=>{
     ui.finished=true;
@@ -9630,6 +9747,7 @@ function runVolumeCoverage(){
       '<div class="rt3dwarn"><b>'+escapeHtml(t('volume.cancelled'))+'</b><br>'+
       escapeHtml(t('rt3d.cov.cancelledKeep'))+'</div>'
     });
+    if(opts.onAbort) opts.onAbort();
   };
   const workerError=(message)=>{
     ui.finished=true;
@@ -9638,6 +9756,7 @@ function runVolumeCoverage(){
       '<div class="rt3dwarn"><b>'+escapeHtml(t('rt3d.cov.workerError'))+'</b><br>'+
       escapeHtml(message)+'<br>'+escapeHtml(t('rt3d.cov.cancelledKeep'))+'</div>'
     });
+    if(opts.onAbort) opts.onAbort(message);
   };
   const finish=(payload)=>{
     phase('finalize');
@@ -9680,6 +9799,65 @@ function runVolumeCoverage(){
       ui.finished=true;
       rt3dExpWorkerCancel(jobId);
     } };
+}
+
+// ============================================================
+//  STAGE 10A — UNIFIED AUTHORITATIVE COVERAGE ORCHESTRATOR
+//
+//  ONE user operation ("Simular cobertura") runs the two canonical
+//  pipelines sequentially against ONE shared snapshot/revision: the 2D
+//  slice first, then the multi-floor volume. No RF math lives here; both
+//  stages call the exact same runSimulateCoverage()/runVolumeCoverage()
+//  code paths, only in staged mode. Atomicity comes from visibility
+//  gating, not from a second result store: staged publishes write the
+//  normal live structures, but nothing renders until the orchestrator
+//  commits SIMULATED (draw paths consult authVisible()). A superseded run
+//  or a mid-run RF edit can therefore never surface a partial product --
+//  the live previous result (if any) simply stands until commit or discard.
+// ============================================================
+function runAuthoritativeCoverage(){
+  // Supersede anything in flight; the worker serves one job.
+  if(rt3dExpCovJob){ try{rt3dExpCovJob.cancel();}catch(_){} rt3dExpCovJob=null; }
+  if(rt3dVolumeJob){ try{rt3dVolumeJob.cancel();}catch(_){} rt3dVolumeJob=null; }
+  const runId=++authRunId;
+  const revision=rfRevision||0;
+  const snapshotState=JSON.parse(JSON.stringify(state, (k,v)=> (k==='_img'||k==='rfRevision'||k==='simulationRevision'||k==='simulationStartRevision'||k==='isCurrent') ? undefined : v));
+  const alive=()=>runId===authRunId&&(rfRevision||0)===revision;
+  productState='SIMULATING';
+  updateCoverageToggle(); draw2d(); if(view==='3d')build3d();  // hide preview immediately
+  const abortAll=()=>{
+    if(runId!==authRunId) return;
+    // The previous live result (if any) was never touched: keep showing it
+    // only when the design is unchanged, otherwise fall back to DESIGN.
+    if(rt3dNormalActive&&rt3dVolume&&(rfRevision||0)===revision){
+      productState='SIMULATED'; showAuthoritative=true;
+    }else{
+      productState='DESIGN';
+    }
+    updateCoverageToggle(); scheduleHeat(); draw2d(); if(view==='3d')build3d();
+  };
+  runSimulateCoverage({ staged:true, runId:runId, snapshotState:snapshotState,
+    simulationStartRevision:revision,
+    onAbort:abortAll,
+    onDone:()=>{
+      if(!alive()){ abortAll(); return; }
+      runVolumeCoverage({ staged:true, runId:runId, snapshotState:snapshotState,
+        simulationStartRevision:revision,
+        onAbort:abortAll,
+        onDone:(payload)=>{
+          if(!alive()){ abortAll(); return; }
+          productState='SIMULATED'; showAuthoritative=true;
+          updateCoverageToggle(); draw2d(); if(view==='3d')build3d();
+          let nPlanes=0;
+          const wb=payload.multi?payload.floors:[{planes:payload.planes}];
+          for(const W of wb) nPlanes+=W.planes.length;
+          showToast(false,{html:
+            '<div class="rt3dh2">'+escapeHtml(t('volume.title'))+'</div>'+
+            '<div class="rt3dn">'+escapeHtml(t('volume.done',{planes:nPlanes,
+              cells:payload.evaluatedCells}))+'</div>'
+          });
+        }});
+    }});
 }
 
 // ============================================================
@@ -9911,6 +10089,8 @@ function rt3dCloudMeshFor(e, lutTex, cx, cz){
 // Returns true when at least one cloud is on screen, false for sheets fallback.
 function refresh3dCloud(){
   clearCloudMesh();
+  // Stage 10A: the cloud renders only while the authoritative result is visible.
+  if(!authVisible()) return false;
   if(!three || !rt3dVolume || !rt3dVolume.floors) return false;
   if(rt3dVolumeSheetsForced()) return false;          // dev/debug sheets
   if(three.cloudFailed) return false;                   // program failed once: stay on sheets
@@ -16222,7 +16402,9 @@ let heatPlane=null;
 function refresh3dHeat(){
   if(!three)return;
   if(heatPlane){ three.root.remove(heatPlane); heatPlane.geometry.dispose(); heatPlane=null; }
-  if(!showHeat || !heatCanvas || !heatMeta || heatMeta.floorId!==floor().id) return;
+  // Stage 10A: the legacy preview plane shows only in DESIGN with preview on.
+  // Authoritative cloud/sheets own Vista 3D once simulated (never stacked).
+  if(productState!=='DESIGN' || !showHeat || !heatCanvas || !heatMeta || heatMeta.floorId!==floor().id) return;
   const cx=(floorBounds(floor()).minx+floorBounds(floor()).maxx)/2;
   const cz=(floorBounds(floor()).miny+floorBounds(floor()).maxy)/2;
   const tex=new THREE.CanvasTexture(heatCanvas); tex.needsUpdate=true;
@@ -17541,8 +17723,12 @@ function loadProject(file){
       // rebuild background images
       state.floors.forEach(f=>{ if(f.bg&&f.bg.data){ const im=new Image(); im.onload=()=>{draw2d();if(view==='3d')build3d();}; im.src=f.bg.data; f.bg._img=im; } });
       // A new project invalidates every retained runtime result, including
-      // the multi-floor volume (floor ids never survive a load).
+      // the multi-floor volume (floor ids never survive a load). Stage 10A:
+      // back to DESIGN with preview available, like a fresh load.
       rt3dVolume=null; volumePlanes3d=[]; clearCloudMesh();
+      rt3dNormalActive=false; rt3dNormalCanvas=null; rt3dNormalMeta=null; rt3dNormalSpec=null;
+      productState='DESIGN'; showAuthoritative=true;
+      updateCoverageToggle();
       bootUI(); scheduleHeat();
       showToast(true,uiMessage('project.opened'),null,1500);
     }catch(err){ showToast(true,uiMessage('error.readFile',{error:err.uiMessage||err.message}),null,2600); }
@@ -18547,10 +18733,9 @@ function wireGlobals(){
   $('#addFloor').onclick=()=>{ commit(); const f=freshFloor(null,state.floors.length); f.height=state.floors[state.floors.length-1].height;
     state.floors.push(f); setActiveFloor(state.floors.length-1); buildFloors(); refreshStats(); };
   $('#addMat').onclick=()=>{ commit(); const m={id:uid('mat'),name:'New material',db:5,color:'#9aa7b5'}; state.materials.push(m); state.activeMat=m.id; buildMaterials(); };
-  $('#btnHeat').onclick=()=>{ showHeat=!showHeat; $('#btnHeat').classList.toggle('primary',showHeat);
-    $('#legend').classList.toggle('off',!showHeat); if(showHeat)scheduleHeat(); else {heatCanvas=null;draw2d();if(view==='3d')refresh3dHeat();} };
+  $('#btnHeat').onclick=onCoverageToggle;
   $('#btnTrace').onclick=()=>{ runRayTrace(()=>{}); };
-  $('#btnSimulate').onclick=runSimulateCoverage;
+  $('#btnSimulate').onclick=runAuthoritativeCoverage;
   $('#btnVolume').onclick=runVolumeCoverage;
   $('#btnSave').onclick=saveProject;
   $('#btnLoad').onclick=()=>$('#fileLoad').click();
@@ -18608,6 +18793,7 @@ function wireGlobals(){
   lp.addEventListener('pointerdown',e=>{ if(e.target.matches('input[type=range],select')) commitThrottled(); }, true);
   lp.addEventListener('focusin',e=>{ if(e.target.matches('input')) commitThrottled(); });
   $('#btnHeat').classList.add('primary');
+  updateCoverageToggle();   // Stage 10A: Vista previa label on fresh load
   window.addEventListener('resize',()=>{ resizeCanvas(); resize3d(); });
 }
 

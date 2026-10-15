@@ -213,8 +213,12 @@ main.run(`state.floors.push(freshFloor('P2',2)); state.activeFloor=2;`);
 check(17, 'floor above maxFloorIndex is not covered: rerun required',
   main.run('rt3dVolumeFresh()') === false);
 main.run(`state.floors.pop(); state.activeFloor=1; markRfChanged();`);
-check(18, 'any RF edit makes the entire multi-floor result STALE',
-  main.run('rt3dVolumeFresh()') === false);
+check(18, 'any RF edit discards the entire multi-floor result (Stage 10A: no STALE retention)',
+  main.run(`productState==='DESIGN'&&rt3dVolume===null`) === true);
+main.run(`rt3dVolume={ maxFloorIndex: 1,
+    floors: [ { floorId: state.floors[0].id, floorIndex: 0, elev: 0,
+                spec: null, zs: [], planes: [] } ],
+    meta: { simulationRevision: 0, simulationStartRevision: 0 } };`);
 check(19, 'entry lookup identity-gates floors (wrong id yields nothing)',
   main.run(`(function(){
     var keep=rt3dVolume.floors[0].floorId;

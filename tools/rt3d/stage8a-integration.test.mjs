@@ -18,8 +18,8 @@ function assertNot(cond, msg) {
 
 console.log('\n=== Stage 8A Integration Tests ===\n');
 
-// 1. runSimulateCoverage function exists
-assert(html.includes('function runSimulateCoverage()'), 'runSimulateCoverage function defined');
+// 1. runSimulateCoverage function exists (Stage 10A: optional staged-mode param)
+assert(html.includes('function runSimulateCoverage('), 'runSimulateCoverage function defined');
 assert(html.includes('rt3dExpWorkerStart'), 'calls rt3dExpWorkerStart');
 assert(html.includes('phase('), 'uses phased progress');
 assert(html.includes('showToast'), 'uses existing toast for progress');
@@ -39,10 +39,12 @@ assert(html.includes('"toolbar.simulateCoverageTitle": "Ejecutar simulación de 
 assert(html.includes('"toolbar.simulateCoverageTitle": "Run authoritative RT3D coverage simulation"'), 'EN tooltip');
 assert(html.includes('"toolbar.simulateCoverageTitle": "Kör auktoritativ RT3D-täckningssimulering"'), 'SV tooltip');
 
-// 4. wireGlobals hooks btnSimulate to runSimulateCoverage
+// 4. wireGlobals hooks the single authoritative action (Stage 10A: the
+// Simulate control launches the 2D+3D orchestrator; the raw pipeline stays
+// available for dev/console use)
 assert(html.includes('btnSimulate'), 'btnSimulate referenced in wireGlobals');
-assert(html.includes('runSimulateCoverage'), 'runSimulateCoverage called in wireGlobals');
-assert(html.includes('.onclick=runSimulateCoverage'), 'click handler wired');
+assert(html.includes('runAuthoritativeCoverage'), 'orchestrator called in wireGlobals');
+assert(html.includes('.onclick=runAuthoritativeCoverage'), 'click handler wired');
 
 // 5. showToast supports HTML content via msg.html
 assert(html.includes('msg.html'), 'showToast checks for msg.html');
