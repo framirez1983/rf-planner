@@ -271,7 +271,7 @@ check(33, 'shader samples vec3(uvw.x, uvw.z, layer), never the transposed swizzl
   !!FRAG && FRAG.includes('vec3(uvw.x, uvw.z,') && !FRAG.includes('vec3(uvw.x, uvw.y,'),
   'axis swizzle wrong or ambiguous');
 check(34, 'compositing is internally consistent: associated output + premultiplied blending',
-  !!FRAG && FRAG.includes('fragColor = vec4(acc, 1.0 - trans)') &&
+  !!FRAG && FRAG.includes('fragColor = vec4(acc * uMaxOpacity, rawAlpha * uMaxOpacity)') &&
     CODE.includes('premultipliedAlpha: true') &&
     !CODE.includes('PremultipliedAlphaBlending'),
   'output/blending mismatch would double-multiply alpha');

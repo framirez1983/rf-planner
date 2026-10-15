@@ -9185,6 +9185,12 @@ const RT3D_VOLUME_STEPS = 64;        // conservative default raymarch step budge
 // Centralized here so the RSSI->opacity mapping has exactly one definition.
 // These shape APPEARANCE only: no RSSI value is ever altered by them.
 const RT3D_VOLUME_DMAX = 2.0;
+// Final presentation ceiling for the volumetric cloud: no ray may present
+// more than ~18% opacity, so walls/racks/APs stay visually dominant and the
+// coverage reads as fog, never as a solid. Applied ONCE to the accumulated
+// march result (never per sample): display = raw * MAX for both rgb and
+// alpha, which keeps the associated/premultiplied convention exact.
+const RT3D_CLOUD_MAX_OPACITY = 0.18;
 
 // Independent ephemeral retained multi-floor volume. Never serialized, never
 // in project state or undo history — same runtime-only rule as rt3dNormal*.
@@ -9747,6 +9753,7 @@ uniform int uDepth;
 uniform int uSteps;
 uniform float uDMax;
 uniform float uDensity;
+uniform float uMaxOpacity;
 uniform float uUseDepth;
 uniform float uNear;
 uniform float uFar;
@@ -9826,7 +9833,12 @@ void main(){
     trans *= 1.0 - aStep;
     t += dt;
   }
-  fragColor = vec4(acc, 1.0 - trans);
+  // Presentation ceiling (Stage 9D, display only): the raw march result is
+  // exact volumetric integration; only its final presentation is scaled so no
+  // ray exceeds RT3D_CLOUD_MAX_OPACITY. Both terms share the factor, which
+  // preserves associated (premultiplied) rgb <= alpha.
+  float rawAlpha = 1.0 - trans;
+  fragColor = vec4(acc * uMaxOpacity, rawAlpha * uMaxOpacity);
 }`;
 
 // One Stage-9B cloud box for a single retained floor entry. Same shader,
@@ -9871,6 +9883,7 @@ function rt3dCloudMeshFor(e, lutTex, cx, cz){
       uSize:{ value:new THREE.Vector3(w, h, dd) },
       uZs:{ value:zarr }, uDepth:{ value:nz }, uSteps:{ value:RT3D_VOLUME_STEPS },
       uDMax:{ value:RT3D_VOLUME_DMAX }, uDensity:{ value:1.0 },
+      uMaxOpacity:{ value:RT3D_CLOUD_MAX_OPACITY },
       uUseDepth:{ value:0 }, uNear:{ value:0.1 }, uFar:{ value:500 },
       uResolution:{ value:new THREE.Vector2(1,1) }
     },
