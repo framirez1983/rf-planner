@@ -52,7 +52,7 @@ main.run(`state=freshState(); state.activeFloor=0;`);
 check(1, 'RT3D_CLOUD_MAX_OPACITY exists and equals 0.18',
   main.run('RT3D_CLOUD_MAX_OPACITY') === 0.18);
 check(2, 'ceiling is wired to the cloud material as a uniform',
-  CODE.includes('uMaxOpacity:{ value:RT3D_CLOUD_MAX_OPACITY }'),
+  CODE.includes('uMaxOpacity:{ value:cloudIntensity }'),
   'uniform wiring missing');
 check(3, 'shader declares the ceiling uniform and scales the final result once',
   (() => {

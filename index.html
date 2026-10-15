@@ -150,6 +150,12 @@
   #legend .bar{height:10px;border-radius:5px;margin-bottom:5px}
   #legend .scale{display:flex;justify-content:space-between;font-family:var(--mono);font-size:9px;color:var(--muted)}
   #legend.off{display:none}
+  /* Stage 10C refinement: the intensity control lives INSIDE the legend as one
+     compact RF HUD (title + slider row under a divider), not as a separate
+     floating panel. Same footprint, same mono labels. */
+  #legendIntensity{margin-top:9px;padding-top:8px;border-top:1px solid var(--line)}
+  #legendIntensity .irow{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:9px;color:var(--muted)}
+  #legendIntensity input[type=range]{flex:1;min-width:0}
 
   /* toast / progress */
   #toast{position:absolute;left:50%;top:64px;transform:translateX(-50%);z-index:30;
@@ -364,6 +370,10 @@ höger·drag · panorera</div>
         <div class="lt" data-i18n="coverage.signal">Signal (RSSI)</div>
         <div class="bar" id="legendBar"></div>
         <div class="scale"><span>-90 dBm</span><span>-65</span><span>-40</span></div>
+        <div id="legendIntensity" style="display:none" title="Ajusta únicamente la intensidad visual de la cobertura." data-i18n-title="cloud.intensityTitle">
+          <div class="lt" data-i18n="cloud.intensity">Intensidad</div>
+          <div class="irow"><span data-i18n="cloud.faint">Tenue</span><input type="range" id="rfIntensitySlider" min="0.05" max="0.45" step="0.01" value="0.25"><span data-i18n="cloud.strong">Intensa</span></div>
+        </div>
         <div id="covReadout" style="margin-top:7px;font-family:var(--mono);font-size:11px;color:var(--muted)"><span data-i18n="coverage.empty">Täckning: —</span></div>
       </div>
       <div id="toast"></div>
@@ -845,6 +855,10 @@ const translations = {
     "volume.title": "Cobertura 3D · tomografía",
     "volume.planes": "capas",
     "volume.floors": "plantas",
+    "cloud.intensity": "Intensidad",
+    "cloud.intensityTitle": "Ajusta únicamente la intensidad visual de la cobertura.",
+    "cloud.faint": "Tenue",
+    "cloud.strong": "Intensa",
     "auth.simulating": "Simulando cobertura",
     "auth.task": "Tarea",
     "auth.task2d": "Cobertura 2D — Planta {i} de {n}",
@@ -1309,6 +1323,10 @@ const translations = {
     "volume.title": "3D Coverage · tomography",
     "volume.planes": "layers",
     "volume.floors": "floors",
+    "cloud.intensity": "Intensity",
+    "cloud.intensityTitle": "Adjusts only the visual intensity of the coverage.",
+    "cloud.faint": "Subtle",
+    "cloud.strong": "Strong",
     "auth.simulating": "Simulating coverage",
     "auth.task": "Task",
     "auth.task2d": "2D coverage — Floor {i} of {n}",
@@ -1773,6 +1791,10 @@ const translations = {
     "volume.title": "3D-täckning · tomografi",
     "volume.planes": "lager",
     "volume.floors": "våningar",
+    "cloud.intensity": "Intensitet",
+    "cloud.intensityTitle": "Justerar endast täckningens visuella intensitet.",
+    "cloud.faint": "Svag",
+    "cloud.strong": "Stark",
     "auth.simulating": "Simulerar täckning",
     "auth.task": "Uppgift",
     "auth.task2d": "2D-täckning — Våning {i} av {n}",
@@ -2196,6 +2218,7 @@ function updateCoverageToggle(){
   }
   const lg=(typeof $!=='undefined')?$('#legend'):null;
   if(lg&&lg.classList) lg.classList.toggle('off',!vis);
+  updateIntensityControl();
 }
 function onCoverageToggle(){
   if(productState==='SIMULATING') return;   // one job in flight: toggle waits
@@ -9349,6 +9372,40 @@ const RT3D_VOLUME_DMAX = 2.0;
 // march result (never per sample): display = raw * MAX for both rgb and
 // alpha, which keeps the associated/premultiplied convention exact.
 const RT3D_CLOUD_MAX_OPACITY = 0.18;
+// Stage 10C intensity range (display-only visual preference). The 9D ceiling
+// above stays defined for its regression; the live uniform is sourced from
+// cloudIntensity below, so 0.18 remains reachable through the slider.
+const RT3D_CLOUD_INTENSITY_MIN = 0.05;
+const RT3D_CLOUD_INTENSITY_DEFAULT = 0.25;
+const RT3D_CLOUD_INTENSITY_MAX = 0.45;
+let cloudIntensity = RT3D_CLOUD_INTENSITY_DEFAULT;
+// Push the runtime intensity to every live cloud material (all floors share
+// one global value). Uniforms only: no texture, geometry or RF rebuild, and
+// the continuously running 3D frame loop picks it up on the next frame.
+function applyCloudIntensity(){
+  for(const m of cloudMeshes){
+    try{ m.material.uniforms.uMaxOpacity.value=cloudIntensity; }catch(_){}
+  }
+}
+// Slider input: visual preference only. Never a Worker, never an RF edit,
+// never invalidation, never serialization.
+function onCloudIntensityInput(e){
+  const v=parseFloat(e&&e.target?e.target.value:NaN);
+  if(!Number.isFinite(v)) return;
+  cloudIntensity=clamp(v,RT3D_CLOUD_INTENSITY_MIN,RT3D_CLOUD_INTENSITY_MAX);
+  applyCloudIntensity();
+}
+// Show the intensity subsection only for a visible authoritative cloud:
+// Vista 3D with a valid simulation and Mostrar cobertura ON. Everything else
+// hides it. The legend container itself keeps its own existing behavior.
+function updateIntensityControl(){
+  const el=(typeof $!=='undefined')?$('#legendIntensity'):null;
+  if(!el||!el.style) return;
+  const show=view==='3d'&&productState==='SIMULATED'&&showAuthoritative;
+  el.style.display=show?'block':'none';
+  const s=(typeof $!=='undefined')?$('#rfIntensitySlider'):null;
+  if(s){ try{ if(Number(s.value)!==cloudIntensity) s.value=String(cloudIntensity); }catch(_){} }
+}
 
 // Independent ephemeral retained multi-floor volume. Never serialized, never
 // in project state or undo history — same runtime-only rule as rt3dNormal*.
@@ -10349,7 +10406,7 @@ function rt3dCloudMeshFor(e, lutTex, cx, cz){
       uSize:{ value:new THREE.Vector3(w, h, dd) },
       uZs:{ value:zarr }, uDepth:{ value:nz }, uSteps:{ value:RT3D_VOLUME_STEPS },
       uDMax:{ value:RT3D_VOLUME_DMAX }, uDensity:{ value:1.0 },
-      uMaxOpacity:{ value:RT3D_CLOUD_MAX_OPACITY },
+      uMaxOpacity:{ value:cloudIntensity },
       uUseDepth:{ value:0 }, uNear:{ value:0.1 }, uFar:{ value:500 },
       uResolution:{ value:new THREE.Vector2(1,1) }
     },
@@ -17937,6 +17994,7 @@ function setView(v){
   $('#zoomPct').style.display  = v==='2d'?'block':'none';
   if(v==='3d'){ init3d(); resize3d(); build3d(); }
   else { draw2d(); }
+  updateIntensityControl();
 }
 
 // ============================================================
@@ -18018,6 +18076,7 @@ function loadProject(file){
       rt3dNormalActive=false; rt3dNormalCanvas=null; rt3dNormalMeta=null; rt3dNormalSpec=null;
       rt3dAuth2D=null;
       productState='DESIGN'; showAuthoritative=true;
+      cloudIntensity=RT3D_CLOUD_INTENSITY_DEFAULT;
       updateCoverageToggle();
       bootUI(); scheduleHeat();
       showToast(true,uiMessage('project.opened'),null,1500);
@@ -19024,6 +19083,7 @@ function wireGlobals(){
     state.floors.push(f); setActiveFloor(state.floors.length-1); buildFloors(); refreshStats(); };
   $('#addMat').onclick=()=>{ commit(); const m={id:uid('mat'),name:'New material',db:5,color:'#9aa7b5'}; state.materials.push(m); state.activeMat=m.id; buildMaterials(); };
   $('#btnHeat').onclick=onCoverageToggle;
+  $('#rfIntensitySlider').oninput=onCloudIntensityInput;
   $('#btnTrace').onclick=()=>{ runRayTrace(()=>{}); };
   $('#btnSimulate').onclick=runAuthoritativeCoverage;
   $('#btnVolume').onclick=runVolumeCoverage;
