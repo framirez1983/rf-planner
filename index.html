@@ -15872,6 +15872,50 @@ function bgPlaneGeometryClipped(f){
     return {geo};
   }catch(_){ return null; }
 }
+// Which background-plan representation a floor gets in interactive 3D.
+//   idx===0 (PB)                       -> {kind:'legacy'}: the permanent full
+//                                          base reference, never clipped.
+//   upper floor, no valid footprint    -> {kind:'legacy'}: current rectangular
+//                                          fallback so editing can continue.
+//   upper floor, valid canonical footprint -> {kind:'clipped',tris}: ONLY inside
+//                                          the footprint (holes stay empty).
+//   otherwise                          -> null: nothing to show.
+// PB stays full even when another floor is active; the active-floor cutaway
+// itself is enforced by build3d, not here.
+function bgPlanDisplayForFloor(f, idx){
+  const b=f&&f.bg;
+  if(!b||!b.data||b.visible===false) return null;
+  const pw=b.w*b.scale, ph=b.h*b.scale;
+  if(!(pw>0)||!(ph>0)) return null;
+  if(idx===0) return {kind:'legacy'};
+  if(!slabPlanForFloor(f).explicit) return {kind:'legacy'};
+  const tris=bgPlanClippedTriangles(f);
+  return tris?{kind:'clipped',tris:tris}:null;
+}
+// Footprint-clipped background plan geometry for interactive 3D, built from
+// the SAME bgPlanClippedTriangles() the glTF export uses (image ring clipped
+// to footprint-minus-openings: multipart, holes and non-convex outlines all
+// honoured). UVs come from the canonical blueprintUVThree() projection, so a
+// feature at project (x,y) lands on the exact same image pixel as the
+// unclipped plan -- clipping never repositions, rescales or reprojects.
+// y is baked at the legacy plane lift (0.02); winding/normal convention
+// mirrors topGeoForPlan (up-facing).
+// (THREE is guaranteed here: this is only called from build3d.)
+function bgPlanGeometryFootprint(f){
+  const tris=bgPlanClippedTriangles(f);
+  if(!tris||!tris.length) return null;
+  const b=f.bg;
+  const pos=[], uv=[], idx=[];
+  const v=(x,y)=>{ pos.push(x,0.02,y);
+    const t=blueprintUVThree(b,x,y); uv.push(t.u,t.v); return pos.length/3-1; };
+  tris.forEach(t=>{ idx.push(v(t[2].x,t[2].y), v(t[1].x,t[1].y), v(t[0].x,t[0].y)); });
+  if(!idx.length) return null;
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos,3));
+  geo.setAttribute('uv',       new THREE.Float32BufferAttribute(uv,2));
+  geo.setIndex(idx);
+  return geo;
+}
 // Slab geometry for an EXPLICIT footprint, built straight from the canonical
 // {tris,walls} solid so it is the same geometry the glTF export writes. Local
 // space matches the legacy slab exactly: world x,z as authored, y from
@@ -15992,18 +16036,28 @@ function build3d(){
     }
     fl.add(slab);
 
-    // background image as textured plane on this floor (openings clip the plane in 3D)
-    if(f.bg && f.bg._img && f.bg.visible!==false && idx===state.activeFloor){
+    // background image as textured plane on this floor.
+    // PB (floor 0) is the permanent base reference: always shown in full.
+    // An upper floor shows its plan only inside its canonical footprint when
+    // one exists (rectangular fallback otherwise); openings clip the plane
+    // in 3D exactly as before.
+    if(f.bg && f.bg._img && f.bg.visible!==false){
+      const disp=bgPlanDisplayForFloor(f, idx);
       const tex=new THREE.Texture(f.bg._img); tex.needsUpdate=true;
       const pw=f.bg.w*f.bg.scale, ph=f.bg.h*f.bg.scale;
       const pm=new THREE.MeshBasicMaterial({map:tex,transparent:true,opacity:f.bg.opacity*0.8});
-      const clip=bgPlaneGeometryClipped(f);
       let pl=null;
-      if(clip&&clip.geo){ pl=new THREE.Mesh(clip.geo,pm); pl.position.set(-cx,0.02,-cz); }
-      else if(!(clip&&clip.empty)){
-        const pg=new THREE.PlaneGeometry(pw,ph);
-        pl=new THREE.Mesh(pg,pm); pl.rotation.x=-Math.PI/2;
-        pl.position.set(f.bg.x+pw/2-cx, 0.02, f.bg.y+ph/2-cz);
+      if(disp&&disp.kind==='clipped'){
+        const fg=bgPlanGeometryFootprint(f);
+        if(fg){ pl=new THREE.Mesh(fg,pm); pl.position.set(-cx,0,-cz); }
+      }else{
+        const clip=bgPlaneGeometryClipped(f);
+        if(clip&&clip.geo){ pl=new THREE.Mesh(clip.geo,pm); pl.position.set(-cx,0.02,-cz); }
+        else if(!(clip&&clip.empty)){
+          const pg=new THREE.PlaneGeometry(pw,ph);
+          pl=new THREE.Mesh(pg,pm); pl.rotation.x=-Math.PI/2;
+          pl.position.set(f.bg.x+pw/2-cx, 0.02, f.bg.y+ph/2-cz);
+        }
       }
       if(pl)fl.add(pl);
     }
