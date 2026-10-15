@@ -294,41 +294,106 @@
           var sources = env.run('rt3dCoverageSources()');
           job.snapshot.sources = sources;
 
-          // --- Stage 9A volume path -------------------------------------
-          // A RUN_VOLUME snapshot carries `zs` (absolute world-Z planes) and a
-          // single shared `spec`. World, BVH and sources are built ONCE above
-          // and reused for every plane; each plane is evaluated by the SAME
-          // rt3dCoverageSlice() call the single-slice path uses, with its own
-          // resumable cursor and stats. No RF math lives here: this is only
-          // scheduling around the canonical engine function.
-          var volZs = (job.snapshot.zs && job.snapshot.zs.length)
-            ? job.snapshot.zs.slice() : null;
-          if (volZs) {
+          // --- Stage 9C multi-floor volume path ------------------------------
+          // A RUN_VOLUME snapshot carries either the legacy single-floor
+          // `{spec, zs}` or the multi-floor `{floors:[{floorIndex,spec,zs}]}`.
+          // Either way the world, BVH and sources built ONCE above are reused
+          // for every plane of every floor; each plane is evaluated by the
+          // SAME rt3dCoverageSlice() call the single-slice path uses, with its
+          // own resumable cursor and stats. No RF math lives here: this is
+          // only scheduling around the canonical engine function.
+          var volFloors = null, volLegacy = false;
+          if (job.snapshot.floors && job.snapshot.floors.length) {
+            volFloors = job.snapshot.floors.map(function (F) {
+              return { floorIndex: F.floorIndex, spec: F.spec, zs: (F.zs || []).slice() };
+            }).filter(function (F) { return F.zs.length > 0; });
+          } else if (job.snapshot.zs && job.snapshot.zs.length) {
+            volLegacy = true;
+            volFloors = [{ floorIndex: job.snapshot.floorIndex || 0,
+                           spec: job.snapshot.spec, zs: job.snapshot.zs.slice() }];
+          }
+          if (volFloors && volFloors.length) {
             job.snapshot.backend = opts.backend || 'bvh';
             job.snapshot.chunkMs = chunkMs;
-            job.snapshot.cursors = volZs.map(function () {
+            // One task per (floor, plane); per-floor specs may differ in size.
+            var tasks = [];
+            volFloors.forEach(function (F, fi) {
+              var tn = F.spec.cols * F.spec.rows;
+              F.zs.forEach(function (z, pi) {
+                tasks.push({ f: fi, spec: F.spec, planeZ: z, n: tn,
+                             planeIndex: pi, numPlanes: F.zs.length });
+              });
+            });
+            var taskBase = tasks.map(function () { return 0; });
+            var running = 0;
+            tasks.forEach(function (T, ti) { taskBase[ti] = running; running += T.n; });
+            var volTotal = running;
+            job.snapshot.taskCursors = tasks.map(function () {
               return { j: 0, i: 0, best: null, apBest: null, valid: null, acc: null };
             });
-            job.snapshot.statsArr = volZs.map(function () { return env.run('rt3dNewStats()'); });
-            job.snapshot.planeIndex = 0;
-            job.snapshot.planeResults = [];
-            var volN = job.snapshot.spec.cols * job.snapshot.spec.rows;
-            var volTotal = volN * volZs.length;
+            job.snapshot.taskStats = tasks.map(function () { return env.run('rt3dNewStats()'); });
+            job.snapshot.taskIndex = 0;
+            job.snapshot.taskResults = [];
             var volReported = 0;
+            var volTransfer = null;
+            var volPlanePayload = function (sr) {
+              volTransfer.push(sr.best.buffer, sr.apBest.buffer, sr.valid.buffer);
+              var sd = sr.diagnostics;
+              return {
+                planeZ: sr.planeZ,
+                evaluatedCells: sr.evaluatedCells,
+                validCells: sr.validCells,
+                noSignalCells: sr.noSignalCells,
+                complete: sr.complete,
+                grid: { best: sr.best, apBest: sr.apBest, valid: sr.valid },
+                diagnostics: {
+                  receiverPlaneZ: sd.receiverPlaneZ,
+                  cellsEvaluated: sd.cellsEvaluated,
+                  participatingAps: sd.participatingAps,
+                  ownerFloors: sd.ownerFloors,
+                  directPathsTested: sd.directPathsTested,
+                  validReflectedPaths: sd.validReflectedPaths,
+                  worldBodies: sd.worldBodies,
+                  bvhNodes: bvh && bvh.nodeCount != null ? bvh.nodeCount : 0,
+                  bvhCandidatesTested: sd.bvhCandidatesTested,
+                  sliceTotalMs: sd.totalMs,
+                  rasterRule: sd.rasterRule,
+                  aggregationRule: sd.aggregationRule,
+                  antennaModel: sd.antennaModel,
+                  aggregationNote: sd.aggregationNote
+                }
+              };
+            };
+            var volSpecPayload = function (sp) {
+              return {
+                cols: sp.cols, rows: sp.rows,
+                cell: sp.cell, cw: sp.cw, ch: sp.ch,
+                raySpacing: sp.raySpacing,
+                b: { minx: sp.b.minx, miny: sp.b.miny,
+                     maxx: sp.b.maxx, maxy: sp.b.maxy }
+              };
+            };
+            var volSourcesPayload = function () {
+              return JSON.parse(JSON.stringify(sources.map(function (s) {
+                return { apId: s.ap.id, apName: s.ap.name || '', floorIndex: s.floorIndex };
+              })));
+            };
             var runVolumeChunk = function () {
               if (isStale()) { reportCancelled(); return; }
               try {
-                var pi = job.snapshot.planeIndex;
-                job.snapshot.cursor = job.snapshot.cursors[pi];
-                job.snapshot.stats = job.snapshot.statsArr[pi];
-                job.snapshot.planeZ = volZs[pi];
+                var ti = job.snapshot.taskIndex, T = tasks[ti];
+                var F = volFloors[T.f];
+                job.snapshot.cursor = job.snapshot.taskCursors[ti];
+                job.snapshot.stats = job.snapshot.taskStats[ti];
+                job.snapshot.spec = T.spec;
+                job.snapshot.planeZ = T.planeZ;
                 var volSlice = env.run(
                   'rt3dCoverageSlice(__RT3D_JOB__.world, __RT3D_JOB__.spec, __RT3D_JOB__.planeZ, {' +
                   '  cursor: __RT3D_JOB__.cursor, stats: __RT3D_JOB__.stats,' +
                   '  sources: __RT3D_JOB__.sources, backend: __RT3D_JOB__.backend,' +
                   '  timeBudgetMs: __RT3D_JOB__.chunkMs })');
 
-                var volDone = pi * volN + volSlice.evaluatedCells;
+                var volDone = taskBase[ti] + volSlice.evaluatedCells;
                 if (volDone - volReported >= progressEvery) {
                   volReported = volDone;
                   emit({
@@ -336,8 +401,9 @@
                     evaluatedCells: volDone,
                     totalCells: volTotal,
                     percent: volTotal ? volDone / volTotal : 1,
-                    planeIndex: pi, numPlanes: volZs.length,
-                    planeZ: volZs[pi]
+                    floorIndex: F.floorIndex, numFloors: volFloors.length,
+                    planeIndex: T.planeIndex, numPlanes: T.numPlanes,
+                    planeZ: T.planeZ
                   });
                 }
 
@@ -347,63 +413,50 @@
                   return;
                 }
 
-                job.snapshot.planeResults.push(volSlice);
-                job.snapshot.planeIndex = pi + 1;
-                if (pi + 1 < volZs.length) {
+                job.snapshot.taskResults.push(volSlice);
+                job.snapshot.taskIndex = ti + 1;
+                if (ti + 1 < tasks.length) {
                   if (cancelled) { reportCancelled(); return; }
                   yieldNow(runVolumeChunk);
                   return;
                 }
 
-                // All planes complete: build the transferable payload.
-                var volTransfer = [];
-                var volPlanes = job.snapshot.planeResults.map(function (sr) {
-                  volTransfer.push(sr.best.buffer, sr.apBest.buffer, sr.valid.buffer);
-                  var sd = sr.diagnostics;
-                  return {
-                    planeZ: sr.planeZ,
-                    evaluatedCells: sr.evaluatedCells,
-                    validCells: sr.validCells,
-                    noSignalCells: sr.noSignalCells,
-                    complete: sr.complete,
-                    grid: { best: sr.best, apBest: sr.apBest, valid: sr.valid },
-                    diagnostics: {
-                      receiverPlaneZ: sd.receiverPlaneZ,
-                      cellsEvaluated: sd.cellsEvaluated,
-                      participatingAps: sd.participatingAps,
-                      ownerFloors: sd.ownerFloors,
-                      directPathsTested: sd.directPathsTested,
-                      validReflectedPaths: sd.validReflectedPaths,
-                      worldBodies: sd.worldBodies,
-                      bvhNodes: bvh && bvh.nodeCount != null ? bvh.nodeCount : 0,
-                      bvhCandidatesTested: sd.bvhCandidatesTested,
-                      sliceTotalMs: sd.totalMs,
-                      rasterRule: sd.rasterRule,
-                      aggregationRule: sd.aggregationRule,
-                      antennaModel: sd.antennaModel,
-                      aggregationNote: sd.aggregationNote
-                    }
+                // Every floor finished: publish exactly one COMPLETE.
+                volTransfer = [];
+                var volPayload = null;
+                if (volLegacy) {
+                  volPayload = {
+                    type: MSG.COMPLETE,
+                    jobId: jobId,
+                    volume: true,
+                    spec: volSpecPayload(volFloors[0].spec),
+                    planeZs: volFloors[0].zs.slice(),
+                    planes: job.snapshot.taskResults.map(volPlanePayload),
+                    evaluatedCells: volTotal,
+                    totalCells: volTotal,
+                    sources: volSourcesPayload()
                   };
-                });
-                var volPayload = {
-                  type: MSG.COMPLETE,
-                  jobId: jobId,
-                  volume: true,
-                  spec: {
-                    cols: job.snapshot.spec.cols, rows: job.snapshot.spec.rows,
-                    cell: job.snapshot.spec.cell, cw: job.snapshot.spec.cw, ch: job.snapshot.spec.ch,
-                    raySpacing: job.snapshot.spec.raySpacing,
-                    b: { minx: job.snapshot.spec.b.minx, miny: job.snapshot.spec.b.miny,
-                         maxx: job.snapshot.spec.b.maxx, maxy: job.snapshot.spec.b.maxy }
-                  },
-                  planeZs: volZs.slice(),
-                  planes: volPlanes,
-                  evaluatedCells: volTotal,
-                  totalCells: volTotal,
-                  sources: JSON.parse(JSON.stringify(sources.map(function (s) {
-                    return { apId: s.ap.id, apName: s.ap.name || '', floorIndex: s.floorIndex };
-                  })))
-                };
+                } else {
+                  var perFloor = volFloors.map(function () { return []; });
+                  job.snapshot.taskResults.forEach(function (sr, k) {
+                    perFloor[tasks[k].f].push(volPlanePayload(sr));
+                  });
+                  volPayload = {
+                    type: MSG.COMPLETE,
+                    jobId: jobId,
+                    volume: true,
+                    multi: true,
+                    floors: volFloors.map(function (F2, fi) {
+                      return { floorIndex: F2.floorIndex,
+                               spec: volSpecPayload(F2.spec),
+                               planeZs: F2.zs.slice(),
+                               planes: perFloor[fi] };
+                    }),
+                    evaluatedCells: volTotal,
+                    totalCells: volTotal,
+                    sources: volSourcesPayload()
+                  };
+                }
 
                 finished = true;
                 emit(volPayload, volTransfer);

@@ -302,11 +302,11 @@ check(36, 'single-channel brick holds exactly cols*rows*depth bytes (not x4)',
     return p.data.length===7*5*2 && p.data.BYTES_PER_ELEMENT===1;
   })()`) === true);
 check(37, 'volume texture declares RedFormat/UnsignedByteType to match the brick',
-  CODE.includes('cloudVolTex.format=THREE.RedFormat') &&
-    CODE.includes('cloudVolTex.type=THREE.UnsignedByteType'),
+  (CODE.includes('volTex.format=THREE.RedFormat')||CODE.includes('cloudVolTex.format=THREE.RedFormat')) &&
+    (CODE.includes('volTex.type=THREE.UnsignedByteType')||CODE.includes('cloudVolTex.type=THREE.UnsignedByteType')),
   'format/type do not match single-channel storage');
 check(38, 'volume texture sets unpackAlignment=1 explicitly (no assumed default)',
-  CODE.includes('cloudVolTex.unpackAlignment=1'),
+  (CODE.includes('volTex.unpackAlignment=1')||CODE.includes('cloudVolTex.unpackAlignment=1')),
   'unpack alignment assumed, not set');
 check(39, 'no undefined blending constants; only r128 blending API is used',
   (() => {
@@ -321,9 +321,9 @@ check(39, 'no undefined blending constants; only r128 blending API is used',
   })(), 'unknown blending constant referenced' + (check.__bad ? ': ' + check.__bad : ''));
 check(40, 'cloud is renderable only after its resources validate; else sheets stay',
   (() => {
-    const seg = fnSegment('refresh3dCloud', 'function update3dVolumeView');
+    const seg = fnSegment('rt3dCloudMeshFor', 'function refresh3dCloud');
     return !!seg && seg.includes('pack.data.length!==pack.cols*pack.rows*pack.depth') &&
-      seg.includes('if(!(pack.cols>0&&pack.rows>0&&pack.depth>0)) return false');
+      seg.includes('if(!(pack.cols>0&&pack.rows>0&&pack.depth>0)) return null');
   })(), 'byte-length/dimension gate missing before sheets are hidden');
 
 console.log(`\n${pass} passed, ${fail} failed`);

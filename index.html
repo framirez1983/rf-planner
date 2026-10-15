@@ -835,6 +835,7 @@ const translations = {
     "toolbar.volumeTitle": "Generar tomografía de cobertura en 3D",
     "volume.title": "Cobertura 3D · tomografía",
     "volume.planes": "capas",
+    "volume.floors": "plantas",
     "volume.done": "tomografía completa: {planes} capas, {cells} celdas",
     "volume.cancelled": "tomografía cancelada",
     "volume.current": "3D actualizada",
@@ -1285,6 +1286,7 @@ const translations = {
     "toolbar.volumeTitle": "Generate 3D coverage tomography",
     "volume.title": "3D Coverage · tomography",
     "volume.planes": "layers",
+    "volume.floors": "floors",
     "volume.done": "tomography complete: {planes} layers, {cells} cells",
     "volume.cancelled": "tomography cancelled",
     "volume.current": "3D up to date",
@@ -1735,6 +1737,7 @@ const translations = {
     "toolbar.volumeTitle": "Generera 3D-täckningstomografi",
     "volume.title": "3D-täckning · tomografi",
     "volume.planes": "lager",
+    "volume.floors": "våningar",
     "volume.done": "tomografi klar: {planes} lager, {cells} celler",
     "volume.cancelled": "tomografi avbruten",
     "volume.current": "3D uppdaterad",
@@ -9183,11 +9186,12 @@ const RT3D_VOLUME_STEPS = 64;        // conservative default raymarch step budge
 // These shape APPEARANCE only: no RSSI value is ever altered by them.
 const RT3D_VOLUME_DMAX = 2.0;
 
-// Independent ephemeral retained volume. Never serialized, never in project
-// state or undo history — same runtime-only rule as rt3dNormal*.
-let rt3dVolume=null;       // {floorId,floorIndex,elev,spec,zs,planes,meta}
+// Independent ephemeral retained multi-floor volume. Never serialized, never
+// in project state or undo history — same runtime-only rule as rt3dNormal*.
+// One simulationRevision covers the complete building result (floors 0..N).
+let rt3dVolume=null;       // {maxFloorIndex,floors:[{floorId,floorIndex,elev,spec,zs,planes}],meta}
 let rt3dVolumeJob=null;    // {id,cancel} in-flight volume job handle
-let volumePlanes3d=[];     // live THREE meshes, rebuilt by refresh3dVolume()
+let volumePlanes3d=[];     // live THREE sheet meshes, rebuilt by refresh3dVolume()
 
 // Visualization grid: same bounds convention as rt3dGridSpec(), coarser cell.
 // Shared by ALL planes of one volume so layers align exactly in XY.
@@ -9252,17 +9256,45 @@ function rt3dVolumePlaneLocalY(planeZ, floorIndex){
   return planeZ - floorElevation(floorIndex);
 }
 
-// Volume freshness mirrors Stage 8B: the retained volume records the
-// rfRevision its snapshot was taken at, and any markRfChanged() since then
-// makes it STALE by revision comparison. Floor-gated like the 2D result.
+// Volume freshness mirrors Stage 8B: the retained multi-floor result records
+// the rfRevision its snapshot was taken at, and any markRfChanged() since
+// then makes the WHOLE result STALE by revision comparison. It is CURRENT
+// only while the revision matches AND the active floor is covered
+// (activeFloor <= maxFloorIndex). A floor switch alone is not an RF edit:
+// moving within the retained range reuses the result with no recomputation.
 function rt3dVolumeFresh(){
   if(!rt3dVolume) return false;
-  if(rt3dVolume.floorId!==floor().id) return false;
+  if(state.activeFloor>rt3dVolume.maxFloorIndex) return false;
   const simRev=rt3dVolume.meta
     ? (rt3dVolume.meta.simulationRevision ?? rt3dVolume.meta.simulationStartRevision)
     : null;
   if(simRev==null) return false;
   return (rfRevision||0)===simRev;
+}
+// Retained entry for canonical floor fi, or null. Besides the revision gate
+// above, each entry is identity-gated: a floor added/removed since the run
+// shifts indices, so an entry renders only while its floorId still sits at
+// its recorded index. This keeps a structurally changed project from
+// misplacing clouds without requiring new revision semantics.
+function rt3dVolumeFloorEntry(fi){
+  if(!rt3dVolume||!rt3dVolume.floors) return null;
+  for(const e of rt3dVolume.floors){
+    if(e.floorIndex!==fi) continue;
+    const cur=state.floors[fi];
+    if(!cur||cur.id!==e.floorId) return null;
+    return e;
+  }
+  return null;
+}
+// Multi-floor simulation request for active floor N: one entry per floor
+// 0..N with that floor's own spec, elevation and absolute-Z planes.
+function rt3dVolumeRequestFloors(activeFloor){
+  const out=[];
+  for(let fi=0;fi<=activeFloor;fi++){
+    const f=state.floors[fi]; if(!f) continue;
+    out.push({ floorIndex:fi, spec:rt3dVolumeSpec(f), zs:rt3dVolumePlanes(fi) });
+  }
+  return out;
 }
 function updateVolStatus(){
   const el=$('#volStatus');
@@ -9397,27 +9429,32 @@ function clearVolumeSheets(){
 }
 function refresh3dVolume(){
   clearVolumeSheets();
-  if(!three || !rt3dVolume) return;
-  if(rt3dVolume.floorId!==floor().id) return;   // floor-gated, like 2D
-  const spec=rt3dVolume.spec, b=spec.b;
+  if(!three || !rt3dVolume || !rt3dVolume.floors) return;
   const fb=floorBounds(floor());
   const cx=(fb.minx+fb.maxx)/2, cz=(fb.miny+fb.maxy)/2;
-  // Attach inside the owning floor's group when it exists so placement uses
-  // the canonical local Y; fall back to root with absolute Z.
-  const host=(three.floorGroups && three.floorGroups[rt3dVolume.floorIndex]) || three.root;
-  const inGroup=(host!==three.root);
-  const w=b.maxx-b.minx, dd=b.maxy-b.miny;
-  for(const p of rt3dVolume.planes){
-    const canvas=rt3dVolumePaintPlane(spec, p.best);
-    const tex=new THREE.CanvasTexture(canvas); tex.needsUpdate=true;
-    tex.magFilter=THREE.LinearFilter; tex.minFilter=THREE.LinearFilter;  // display-only interpolation
-    const g=new THREE.PlaneGeometry(w,dd);
-    const m=new THREE.MeshBasicMaterial({map:tex,transparent:true,opacity:0.6,
-      depthWrite:false,side:THREE.DoubleSide});
-    const mesh=new THREE.Mesh(g,m); mesh.rotation.x=-Math.PI/2;
-    const y=inGroup ? rt3dVolumePlaneLocalY(p.planeZ, rt3dVolume.floorIndex) : p.planeZ;
-    mesh.position.set((b.minx+b.maxx)/2-cx, y, (b.miny+b.maxy)/2-cz);
-    host.add(mesh); volumePlanes3d.push(mesh);
+  // One sheet stack per retained floor at or below the cutaway. Floors above
+  // the active floor are never rendered, matching the 3D cutaway rule.
+  for(const e of rt3dVolume.floors){
+    if(e.floorIndex>state.activeFloor) continue;
+    if(!rt3dVolumeFloorEntry(e.floorIndex)) continue;
+    const spec=e.spec, b=spec.b;
+    // Attach inside the owning floor's group when it exists so placement uses
+    // the canonical local Y; fall back to root with absolute Z.
+    const host=(three.floorGroups && three.floorGroups[e.floorIndex]) || three.root;
+    const inGroup=(host!==three.root);
+    const w=b.maxx-b.minx, dd=b.maxy-b.miny;
+    for(const p of e.planes){
+      const canvas=rt3dVolumePaintPlane(spec, p.best);
+      const tex=new THREE.CanvasTexture(canvas); tex.needsUpdate=true;
+      tex.magFilter=THREE.LinearFilter; tex.minFilter=THREE.LinearFilter;  // display-only interpolation
+      const g=new THREE.PlaneGeometry(w,dd);
+      const m=new THREE.MeshBasicMaterial({map:tex,transparent:true,opacity:0.6,
+        depthWrite:false,side:THREE.DoubleSide});
+      const mesh=new THREE.Mesh(g,m); mesh.rotation.x=-Math.PI/2;
+      const y=inGroup ? rt3dVolumePlaneLocalY(p.planeZ, e.floorIndex) : p.planeZ;
+      mesh.position.set((b.minx+b.maxx)/2-cx, y, (b.miny+b.maxy)/2-cz);
+      host.add(mesh); volumePlanes3d.push(mesh);
+    }
   }
 }
 
@@ -9444,12 +9481,14 @@ function runVolumeCoverage(){
   const t0=performance.now();
   const simulationStartRevision=rfRevision||0;
   const floorIndex=state.activeFloor;
-  const fl=state.floors[floorIndex];
-  const spec=rt3dVolumeSpec(fl);
-  const zs=rt3dVolumePlanes(floorIndex);
+  // One multi-floor run covers floors 0..activeFloor (the 3D cutaway rule).
+  const reqFloors=rt3dVolumeRequestFloors(floorIndex);
+  const launchFloorIds=state.floors.map(f=>f.id);
   const ui={ phases:[], cur:'snapshot', lastT:t0, firstCellMs:null,
-             cancelled:false, finished:false, cells:0, total:spec.cols*spec.rows*zs.length,
-             cellsPerSec:null, minimized:false, planeIndex:0, numPlanes:zs.length };
+             cancelled:false, finished:false, cells:0,
+             total:reqFloors.reduce((a,F)=>a+F.spec.cols*F.spec.rows*F.zs.length,0),
+             cellsPerSec:null, minimized:false,
+             floorIndex:0, numFloors:reqFloors.length, planeIndex:0, numPlanes:0 };
   const toastEl=$('#toast');
   function onToastClick(e){
     const btn=(e&&e.target&&e.target.closest)?e.target.closest('[data-action]'):null;
@@ -9491,6 +9530,9 @@ function runVolumeCoverage(){
       L.push('<div class="rt3dh2">'+escapeHtml(t('volume.title'))+'</div>');
       L.push('<div class="rt3dr"><span>'+escapeHtml(t('rt3d.cov.percent'))+'</span><b>'+pct+'%</b></div>');
       L.push('<progress max="1" value="'+frac+'" style="width:100%"></progress>');
+      if(ui.numFloors>1)
+        L.push('<div class="rt3dr"><span>'+escapeHtml(t('volume.floors'))+'</span><b>'+
+          Math.min(ui.floorIndex+1,ui.numFloors)+' / '+ui.numFloors+'</b></div>');
       if(ui.numPlanes>1)
         L.push('<div class="rt3dr"><span>'+escapeHtml(t('volume.planes'))+'</span><b>'+
           Math.min(ui.planeIndex+1,ui.numPlanes)+' / '+ui.numPlanes+'</b></div>');
@@ -9531,9 +9573,8 @@ function runVolumeCoverage(){
 
   const snapshot={
     state: JSON.parse(JSON.stringify(state, (k,v)=> (k==='_img'||k==='rfRevision'||k==='simulationRevision'||k==='simulationStartRevision'||k==='isCurrent') ? undefined : v)),
-    floorIndex: floorIndex,
-    spec: spec,
-    zs: zs
+    activeFloorIndex: floorIndex,
+    floors: reqFloors
   };
 
   phase('world');
@@ -9545,14 +9586,23 @@ function runVolumeCoverage(){
     phase('paint');
     // The worker computed the snapshot taken at simulationStartRevision, so a
     // mid-run edit publishes STALE by revision comparison (Stage 8B rule).
+    // Floor ids are the launch-time ones: a floor added/removed mid-run must
+    // not shift entries onto the wrong floor (rendering identity-gates them).
     const simulationRevision=simulationStartRevision;
+    const wb=payload.multi?payload.floors:[{
+      floorIndex:floorIndex, spec:payload.spec,
+      planeZs:payload.planeZs, planes:payload.planes }];
+    let nPlanes=0;
+    for(const W of wb) nPlanes+=W.planes.length;
     rt3dVolume={
-      floorId: fl.id, floorIndex: floorIndex, elev: floorElevation(floorIndex),
-      spec: payload.spec, zs: payload.planeZs.slice(),
-      planes: payload.planes.map(p=>({ planeZ:p.planeZ, best:p.grid.best,
-        apBest:p.grid.apBest, valid:p.grid.valid,
-        evaluatedCells:p.evaluatedCells, validCells:p.validCells,
-        noSignalCells:p.noSignalCells, diagnostics:p.diagnostics })),
+      maxFloorIndex: floorIndex,
+      floors: wb.map(W=>({ floorId:launchFloorIds[W.floorIndex], floorIndex:W.floorIndex,
+        elev:floorElevation(W.floorIndex),
+        spec:W.spec, zs:W.planeZs.slice(),
+        planes:W.planes.map(p=>({ planeZ:p.planeZ, best:p.grid.best,
+          apBest:p.grid.apBest, valid:p.grid.valid,
+          evaluatedCells:p.evaluatedCells, validCells:p.validCells,
+          noSignalCells:p.noSignalCells, diagnostics:p.diagnostics })) })),
       meta: { simulationRevision:simulationRevision,
               simulationStartRevision:simulationStartRevision,
               sources:payload.sources }
@@ -9560,7 +9610,7 @@ function runVolumeCoverage(){
     ui.finished=true;
     showToast(false,{html:
       '<div class="rt3dh2">'+escapeHtml(t('volume.title'))+'</div>'+
-      '<div class="rt3dn">'+escapeHtml(t('volume.done',{planes:payload.planes.length,
+      '<div class="rt3dn">'+escapeHtml(t('volume.done',{planes:nPlanes,
         cells:payload.evaluatedCells}))+'</div>'
     });
     updateVolStatus();
@@ -9595,6 +9645,7 @@ function runVolumeCoverage(){
       onProgress:(m)=>{
         if(rt3dVolumeJob&&rt3dVolumeJob.id!==m.jobId) return;
         ui.cells=m.evaluatedCells;
+        if(m.numFloors){ ui.floorIndex=m.floorIndex||0; ui.numFloors=m.numFloors; }
         if(m.numPlanes) { ui.planeIndex=m.planeIndex||0; ui.numPlanes=m.numPlanes; }
         if(ui.firstCellMs===null&&m.evaluatedCells>0)
           ui.firstCellMs=+(performance.now()-t0).toFixed(1);
@@ -9641,7 +9692,7 @@ function runVolumeCoverage(){
 //  every sample against the authoritative zs[] (mirroring
 //  rt3dVolumeLayerAt) instead of assuming uniform layers.
 // ============================================================
-let cloudMesh=null, cloudVolTex=null, cloudLUTTex=null;
+let cloudMeshes=[], cloudVolTexs=[], cloudLUTTex=null;
 
 // Dev/debug override back to sheets: ?sheets=1 or window.__RT3D_SHEETS__.
 // Normal product shows the cloud whenever the GPU path is available.
@@ -9660,13 +9711,14 @@ function rt3dCloudSupported(){
   }catch(_){ return false; }
 }
 function clearCloudMesh(){
-  if(cloudMesh){
-    if(cloudMesh.parent) cloudMesh.parent.remove(cloudMesh);
-    if(cloudMesh.geometry) cloudMesh.geometry.dispose();
-    if(cloudMesh.material) cloudMesh.material.dispose();
-    cloudMesh=null;
+  for(const m of cloudMeshes){
+    if(m.parent) m.parent.remove(m);
+    if(m.geometry) m.geometry.dispose();
+    if(m.material) m.material.dispose();
   }
-  if(cloudVolTex){ cloudVolTex.dispose(); cloudVolTex=null; }
+  cloudMeshes=[];
+  for(const t of cloudVolTexs){ try{ t.dispose(); }catch(_){} }
+  cloudVolTexs=[];
   if(cloudLUTTex){ cloudLUTTex.dispose(); cloudLUTTex=null; }
 }
 
@@ -9777,80 +9829,99 @@ void main(){
   fragColor = vec4(acc, 1.0 - trans);
 }`;
 
-// Build (or rebuild) the cloud from the retained exact volume.
-// Returns true when the cloud is on screen, false for sheets fallback.
+// One Stage-9B cloud box for a single retained floor entry. Same shader,
+// LUT, transfer function and upload contract as the single-floor cloud;
+// only the bounds, layers and texture differ per floor. Each box occupies
+// exactly its own floor's XY bounds and zMin..zMax -- never stretched.
+// Returns {mesh, volTex} or null. The caller owns both on success.
+function rt3dCloudMeshFor(e, lutTex, cx, cz){
+  const spec=e.spec, b=spec.b, zs=e.zs;
+  const nz=zs.length;
+  if(!(nz>=1)||nz>RT3D_VOLUME_SHADER_MAX) return null;
+  const pack=rt3dVolumePackPlanes(spec, e.planes);
+  // Byte-exact upload contract (traced through r128 WebGLTextures):
+  // DataTexture3D defaults to RGBAFormat (4 bytes/texel), but the packer
+  // emits ONE byte per voxel. RedFormat+UnsignedByteType selects R8, a
+  // color-filterable WebGL2 format, so texImage3D expects exactly
+  // cols*rows*depth bytes. DataTexture3D already defaults flipY=false and
+  // unpackAlignment=1; both are set explicitly so no default is assumed.
+  if(pack.data.length!==pack.cols*pack.rows*pack.depth) return null;
+  if(!(pack.cols>0&&pack.rows>0&&pack.depth>0)) return null;
+  const volTex=new THREE.DataTexture3D(pack.data, pack.cols, pack.rows, pack.depth);
+  volTex.format=THREE.RedFormat;
+  volTex.type=THREE.UnsignedByteType;
+  volTex.unpackAlignment=1;
+  volTex.flipY=false;
+  volTex.magFilter=THREE.LinearFilter;   // display-only interpolation
+  volTex.minFilter=THREE.LinearFilter;
+  volTex.wrapS=THREE.ClampToEdgeWrapping;
+  volTex.wrapT=THREE.ClampToEdgeWrapping;
+  volTex.needsUpdate=true;
+  const zarr=[];
+  for(let i=0;i<RT3D_VOLUME_SHADER_MAX;i++) zarr.push(i<nz?zs[i]:zs[nz-1]);
+  const w=b.maxx-b.minx, h=zs[nz-1]-zs[0], dd=b.maxy-b.miny;
+  if(!(w>0&&dd>0&&h>0)){ volTex.dispose(); return null; }
+  const g=new THREE.BoxGeometry(w,h,dd);
+  const m=new THREE.ShaderMaterial({
+    glslVersion: THREE.GLSL3,
+    uniforms: {
+      uVol:{ value:volTex }, uLUT:{ value:lutTex },
+      uDepthMap:{ value:null },
+      uMin:{ value:new THREE.Vector3(b.minx-cx, zs[0], b.miny-cz) },
+      uSize:{ value:new THREE.Vector3(w, h, dd) },
+      uZs:{ value:zarr }, uDepth:{ value:nz }, uSteps:{ value:RT3D_VOLUME_STEPS },
+      uDMax:{ value:RT3D_VOLUME_DMAX }, uDensity:{ value:1.0 },
+      uUseDepth:{ value:0 }, uNear:{ value:0.1 }, uFar:{ value:500 },
+      uResolution:{ value:new THREE.Vector2(1,1) }
+    },
+    vertexShader: RT3D_CLOUD_VERT, fragmentShader: RT3D_CLOUD_FRAG,
+    // The marcher outputs ASSOCIATED (premultiplied) color: acc holds the
+    // transmittance-weighted sum and alpha the absorbed fraction. r128 has
+    // no PremultipliedAlphaBlending constant; the r128 API for this is
+    // NormalBlending (the default, stated explicitly) with the material's
+    // premultipliedAlpha=true, which WebGLState turns into blend factors
+    // ONE / ONE_MINUS_SRC_ALPHA -- the exact match for associated output.
+    // Default NormalBlending alone would use SRC_ALPHA and multiply rgb by
+    // alpha a second time, darkening the cloud.
+    blending: THREE.NormalBlending,
+    premultipliedAlpha: true,
+    transparent: true, depthWrite: false, depthTest: true, side: THREE.DoubleSide
+  });
+  const cloudMesh=new THREE.Mesh(g,m);
+  cloudMesh.position.set((b.minx+b.maxx)/2-cx, (zs[0]+zs[nz-1])/2, (b.miny+b.maxy)/2-cz);
+  cloudMesh.renderOrder=5;
+  cloudMesh.frustumCulled=false;
+  return { mesh:cloudMesh, volTex:volTex };
+}
+
+// Build (or rebuild) one cloud per retained floor at or below the cutaway.
+// Returns true when at least one cloud is on screen, false for sheets fallback.
 function refresh3dCloud(){
   clearCloudMesh();
-  if(!three || !rt3dVolume) return false;
-  if(rt3dVolume.floorId!==floor().id) return false;   // floor-gated, like 2D
+  if(!three || !rt3dVolume || !rt3dVolume.floors) return false;
   if(rt3dVolumeSheetsForced()) return false;          // dev/debug sheets
   if(three.cloudFailed) return false;                   // program failed once: stay on sheets
   if(!rt3dCloudSupported()) return false;             // WebGL1 -> sheets
-  const spec=rt3dVolume.spec, b=spec.b, zs=rt3dVolume.zs;
-  const nz=zs.length;
-  if(!(nz>=1)||nz>RT3D_VOLUME_SHADER_MAX) return false;
   try{
     const fb=floorBounds(floor());
     const cx=(fb.minx+fb.maxx)/2, cz=(fb.miny+fb.maxy)/2;
-    const pack=rt3dVolumePackPlanes(spec, rt3dVolume.planes);
-    // Byte-exact upload contract (traced through r128 WebGLTextures):
-    // DataTexture3D defaults to RGBAFormat (4 bytes/texel), but the packer
-    // emits ONE byte per voxel. RedFormat+UnsignedByteType selects R8, a
-    // color-filterable WebGL2 format, so texImage3D expects exactly
-    // cols*rows*depth bytes. DataTexture3D already defaults flipY=false and
-    // unpackAlignment=1; both are set explicitly so no default is assumed.
-    if(pack.data.length!==pack.cols*pack.rows*pack.depth) return false;
-    if(!(pack.cols>0&&pack.rows>0&&pack.depth>0)) return false;
-    cloudVolTex=new THREE.DataTexture3D(pack.data, pack.cols, pack.rows, pack.depth);
-    cloudVolTex.format=THREE.RedFormat;
-    cloudVolTex.type=THREE.UnsignedByteType;
-    cloudVolTex.unpackAlignment=1;
-    cloudVolTex.flipY=false;
-    cloudVolTex.magFilter=THREE.LinearFilter;   // display-only interpolation
-    cloudVolTex.minFilter=THREE.LinearFilter;
-    cloudVolTex.wrapS=THREE.ClampToEdgeWrapping;
-    cloudVolTex.wrapT=THREE.ClampToEdgeWrapping;
-    cloudVolTex.needsUpdate=true;
     const lut=rt3dVolumeBuildLUT();
     cloudLUTTex=new THREE.DataTexture(lut, 256, 1, THREE.RGBAFormat);
     cloudLUTTex.magFilter=THREE.NearestFilter;  // exact bin lookup
     cloudLUTTex.minFilter=THREE.NearestFilter;
     cloudLUTTex.needsUpdate=true;
-    const zarr=[];
-    for(let i=0;i<RT3D_VOLUME_SHADER_MAX;i++) zarr.push(i<nz?zs[i]:zs[nz-1]);
-    const w=b.maxx-b.minx, h=zs[nz-1]-zs[0], dd=b.maxy-b.miny;
-    if(!(w>0&&dd>0&&h>0)) return false;
-    const g=new THREE.BoxGeometry(w,h,dd);
-    const m=new THREE.ShaderMaterial({
-      glslVersion: THREE.GLSL3,
-      uniforms: {
-        uVol:{ value:cloudVolTex }, uLUT:{ value:cloudLUTTex },
-        uDepthMap:{ value:null },
-        uMin:{ value:new THREE.Vector3(b.minx-cx, zs[0], b.miny-cz) },
-        uSize:{ value:new THREE.Vector3(w, h, dd) },
-        uZs:{ value:zarr }, uDepth:{ value:nz }, uSteps:{ value:RT3D_VOLUME_STEPS },
-        uDMax:{ value:RT3D_VOLUME_DMAX }, uDensity:{ value:1.0 },
-        uUseDepth:{ value:0 }, uNear:{ value:0.1 }, uFar:{ value:500 },
-        uResolution:{ value:new THREE.Vector2(1,1) }
-      },
-      vertexShader: RT3D_CLOUD_VERT, fragmentShader: RT3D_CLOUD_FRAG,
-      // The marcher outputs ASSOCIATED (premultiplied) color: acc holds the
-      // transmittance-weighted sum and alpha the absorbed fraction. r128 has
-      // no PremultipliedAlphaBlending constant; the r128 API for this is
-      // NormalBlending (the default, stated explicitly) with the material's
-      // premultipliedAlpha=true, which WebGLState turns into blend factors
-      // ONE / ONE_MINUS_SRC_ALPHA -- the exact match for associated output.
-      // Default NormalBlending alone would use SRC_ALPHA and multiply rgb by
-      // alpha a second time, darkening the cloud.
-      blending: THREE.NormalBlending,
-      premultipliedAlpha: true,
-      transparent: true, depthWrite: false, depthTest: true, side: THREE.DoubleSide
-    });
-    cloudMesh=new THREE.Mesh(g,m);
-    cloudMesh.position.set((b.minx+b.maxx)/2-cx, (zs[0]+zs[nz-1])/2, (b.miny+b.maxy)/2-cz);
-    cloudMesh.renderOrder=5;
-    cloudMesh.frustumCulled=false;
-    three.root.add(cloudMesh);
+    let shown=false;
+    for(const e of rt3dVolume.floors){
+      if(e.floorIndex>state.activeFloor) continue;   // cutaway: never above active
+      if(!rt3dVolumeFloorEntry(e.floorIndex)) continue;
+      const built=rt3dCloudMeshFor(e, cloudLUTTex, cx, cz);
+      if(!built) continue;
+      cloudVolTexs.push(built.volTex);
+      three.root.add(built.mesh);
+      cloudMeshes.push(built.mesh);
+      shown=true;
+    }
+    if(!shown){ clearCloudMesh(); return false; }
     return true;
   }catch(_){ clearCloudMesh(); return false; }
 }
@@ -9882,11 +9953,13 @@ function cloudProgramFailed(){
   return false;
 }
 // Opaque-scene depth prepass for cloud ray termination. Transparent helpers
-// (including the cloud itself and tomography sheets) are hidden for the
+// (including every cloud mesh and all tomography sheets) are hidden for the
 // prepass and restored in a finally, so they can never contaminate the
-// opaque depth texture. Any failure disables depth termination only.
+// opaque depth texture. Exactly ONE prepass runs per frame no matter how many
+// floor clouds are visible. Any failure disables depth termination only.
 function volumeDepthPrepass(){
-  if(!three || !cloudMesh || !cloudMesh.visible) return false;
+  const vis=cloudMeshes.filter(m=>m&&m.visible);
+  if(!three || !vis.length) return false;
   try{
     const size=new THREE.Vector2();
     three.renderer.getDrawingBufferSize(size);
@@ -9909,10 +9982,12 @@ function volumeDepthPrepass(){
       three.renderer.setRenderTarget(null);
       for(const o of hidden) o.visible=true;
     }
-    const u=cloudMesh.material.uniforms;
-    u.uDepthMap.value=three.depthTarget.depthTexture;
-    u.uUseDepth.value=1;
-    u.uResolution.value.set(W,H);
+    for(const m of vis){
+      const u=m.material.uniforms;
+      u.uDepthMap.value=three.depthTarget.depthTexture;
+      u.uUseDepth.value=1;
+      u.uResolution.value.set(W,H);
+    }
     return true;
   }catch(_){ return false; }
 }
@@ -13768,25 +13843,35 @@ function animate3d(){
   const cz=o.tz+o.r*Math.cos(o.el)*Math.cos(o.az);
   three.cam.position.set(cx,cy,cz);
   three.cam.lookAt(o.tx,o.ty,o.tz);
-  if(cloudMesh&&cloudMesh.visible){
-    try{ if(!volumeDepthPrepass()) cloudMesh.material.uniforms.uUseDepth.value=0; }
-    catch(_){ /* depth termination is optional; the cloud still renders */ }
+  if(cloudMeshes.length){
+    try{
+      if(!volumeDepthPrepass()){
+        for(const m of cloudMeshes){
+          try{ m.material.uniforms.uUseDepth.value=0; }catch(_){}
+        }
+      }
+    }
+    catch(_){ /* depth termination is optional; the clouds still render */ }
   }
   three.renderer.render(three.scene,three.cam);
   // Cloud program watchdog (one check per cloud mesh): a shader that failed to
   // link leaves no usable cloud, so fall back to the Stage-9A sheets instead
   // of a blank volume. Runs at most once per mesh; never breaks rendering.
-  if(cloudMesh&&cloudMesh.visible&&!cloudMesh.userData.programChecked){
+  if(cloudMeshes.length){
     try{
-      if(cloudProgramFailed()){
-        cloudMesh.userData.programChecked=true;
-        three.cloudFailed=true;
-        clearCloudMesh(); refresh3dVolume();
-      }else{
-        const list=(three.renderer.info&&three.renderer.info.programs)||[];
-        for(const p of list){
-          if(p&&p.cacheKey&&p.cacheKey.indexOf('volumeLayerAt')>=0){
-            cloudMesh.userData.programChecked=true; break;
+      for(const m of cloudMeshes.slice()){
+        if(!m.visible||m.userData.programChecked) continue;
+        if(cloudProgramFailed()){
+          m.userData.programChecked=true;
+          three.cloudFailed=true;
+          clearCloudMesh(); refresh3dVolume();
+          break;
+        }else{
+          const list=(three.renderer.info&&three.renderer.info.programs)||[];
+          for(const p of list){
+            if(p&&p.cacheKey&&p.cacheKey.indexOf('volumeLayerAt')>=0){
+              m.userData.programChecked=true; break;
+            }
           }
         }
       }
@@ -16165,7 +16250,10 @@ function setActiveFloor(i){
   state.activeFloor=i; select(null); buildFloors(); updateChips(); syncFloorPanel();
   clearFootprintDiagnostics();   // the markers belong to the floor you left
   rt3dNormalActive=false; rt3dNormalCanvas=null; rt3dNormalMeta=null; rt3dNormalSpec=null;  // normal RT3D result is floor-specific
-  rt3dVolume=null; volumePlanes3d=[]; clearCloudMesh(); updateVolStatus();  // tomography volume is floor-specific too
+  // Stage 9C: a floor switch is NOT an RF edit. The retained multi-floor
+  // volume stays valid and rendering shows the subset floors 0..activeFloor;
+  // freshness (revision + coverage) is re-evaluated for the new cutaway.
+  updateVolStatus();
   scheduleHeat();
   if(view==='3d') build3d();
   draw2d();
@@ -17385,6 +17473,9 @@ function loadProject(file){
         f.aps.forEach(a=>{ if(!a.antenna)a.antenna={type:'omni',az:0,tilt:0,gain:3}; if(!a.mountType)a.mountType='ceiling'; if(a.rfEnabled==null)a.rfEnabled=true; if(!a.channels)a.channels=defaultChannels(); }); });
       // rebuild background images
       state.floors.forEach(f=>{ if(f.bg&&f.bg.data){ const im=new Image(); im.onload=()=>{draw2d();if(view==='3d')build3d();}; im.src=f.bg.data; f.bg._img=im; } });
+      // A new project invalidates every retained runtime result, including
+      // the multi-floor volume (floor ids never survive a load).
+      rt3dVolume=null; volumePlanes3d=[]; clearCloudMesh();
       bootUI(); scheduleHeat();
       showToast(true,uiMessage('project.opened'),null,1500);
     }catch(err){ showToast(true,uiMessage('error.readFile',{error:err.uiMessage||err.message}),null,2600); }
