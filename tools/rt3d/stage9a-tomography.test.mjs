@@ -194,7 +194,7 @@ check(13, 'single-slice RUN_SLICE still completes without a volume flag',
 // ---------------------------------------------------------------
 // D. App-level structural guarantees (comment-stripped source)
 // ---------------------------------------------------------------
-const volSeg = fnSegment('runVolumeCoverage', 'const RT3D_AUDIT_TRUTH_HIERARCHY');
+const volSeg = fnSegment('runVolumeCoverage', 'function rt3dProjectCommit');
 check(14, 'volume launch code exists as one contained unit', !!volSeg && volSeg.length > 1000);
 const volAssigns = (volSeg.match(/rt3dVolume\s*=/g) || []).length;
 check(15, 'only COMPLETE publishes the volume (abort/error assign nothing)',

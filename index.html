@@ -845,6 +845,15 @@ const translations = {
     "volume.title": "Cobertura 3D · tomografía",
     "volume.planes": "capas",
     "volume.floors": "plantas",
+    "auth.simulating": "Simulando cobertura",
+    "auth.task": "Tarea",
+    "auth.task2d": "Cobertura 2D — Planta {i} de {n}",
+    "auth.taskVol": "Volumen 3D — Planta {i} de {n}",
+    "auth.cells": "Celdas evaluadas",
+    "auth.rate": "Velocidad",
+    "auth.elapsed": "Tiempo transcurrido",
+    "auth.eta": "Tiempo estimado",
+    "auth.done": "Simulación completa: {floors} plantas",
     "volume.done": "tomografía completa: {planes} capas, {cells} celdas",
     "volume.cancelled": "tomografía cancelada",
     "volume.current": "3D actualizada",
@@ -1300,6 +1309,15 @@ const translations = {
     "volume.title": "3D Coverage · tomography",
     "volume.planes": "layers",
     "volume.floors": "floors",
+    "auth.simulating": "Simulating coverage",
+    "auth.task": "Task",
+    "auth.task2d": "2D coverage — Floor {i} of {n}",
+    "auth.taskVol": "3D volume — Floor {i} of {n}",
+    "auth.cells": "Cells evaluated",
+    "auth.rate": "Speed",
+    "auth.elapsed": "Elapsed time",
+    "auth.eta": "Estimated time",
+    "auth.done": "Simulation complete: {floors} floors",
     "volume.done": "tomography complete: {planes} layers, {cells} cells",
     "volume.cancelled": "tomography cancelled",
     "volume.current": "3D up to date",
@@ -1755,6 +1773,15 @@ const translations = {
     "volume.title": "3D-täckning · tomografi",
     "volume.planes": "lager",
     "volume.floors": "våningar",
+    "auth.simulating": "Simulerar täckning",
+    "auth.task": "Uppgift",
+    "auth.task2d": "2D-täckning — Våning {i} av {n}",
+    "auth.taskVol": "3D-volym — Våning {i} av {n}",
+    "auth.cells": "Utvärderade celler",
+    "auth.rate": "Hastighet",
+    "auth.elapsed": "Förfluten tid",
+    "auth.eta": "Beräknad tid",
+    "auth.done": "Simulering klar: {floors} våningar",
     "volume.done": "tomografi klar: {planes} lager, {cells} celler",
     "volume.cancelled": "tomografi avbruten",
     "volume.current": "3D uppdaterad",
@@ -2147,7 +2174,7 @@ function invalidateAuthoritative(){
   }
   productState='DESIGN';
   rt3dNormalActive=false; rt3dNormalCanvas=null; rt3dNormalMeta=null; rt3dNormalSpec=null;
-  rt3dVolume=null; clearCloudMesh(); clearVolumeSheets();
+  rt3dAuth2D=null; rt3dVolume=null; clearCloudMesh(); clearVolumeSheets();
   if(typeof three!=='undefined'&&three) refresh3dHeat();
   scheduleHeat();
   updateCoverageToggle();
@@ -7552,6 +7579,27 @@ let rt3dExpLastStall=null;
 // ------------------------------------------------------------
 let rt3dNormalCanvas=null, rt3dNormalMeta=null, rt3dNormalSpec=null;
 let rt3dNormalActive=false;
+// Multi-floor authoritative 2D store (Stage 10B): one exact canonical
+// receiver-height slice per project floor. The flat rt3dNormal* vars above
+// remain as the ACTIVE-FLOOR VIEW, synced by auth2DSyncView(), so every
+// existing reader (draw2d, freshness chip, floor switch) keeps working
+// unchanged. Ephemeral runtime-only state, like everything else here.
+let rt3dAuth2D=null;   // {floors:[{floorId,floorIndex,spec,planeZ,best,valid,canvas,meta}],meta:{...}}
+function auth2DSyncView(){
+  rt3dNormalActive=false; rt3dNormalCanvas=null; rt3dNormalMeta=null; rt3dNormalSpec=null;
+  if(!rt3dAuth2D||!rt3dAuth2D.floors) return;
+  for(const e of rt3dAuth2D.floors){
+    if(e.floorIndex!==state.activeFloor) continue;
+    const cur=state.floors[e.floorIndex];
+    if(!cur||cur.id!==e.floorId) return;
+    rt3dNormalCanvas=e.canvas; rt3dNormalSpec=e.spec;
+    rt3dNormalMeta=Object.assign({floorId:e.floorId}, e.meta, {
+      simulationRevision: rt3dAuth2D.meta?rt3dAuth2D.meta.simulationRevision:undefined,
+      simulationStartRevision: rt3dAuth2D.meta?rt3dAuth2D.meta.simulationStartRevision:undefined });
+    rt3dNormalActive=true;
+    return;
+  }
+}
 
 // Single source of truth for which engine is on screen. showHeat is the
 // application's own coverage switch, so if anything else turns it back on —
@@ -9150,6 +9198,14 @@ function runSimulateCoverage(opts){
                       maxx: out.spec.b.maxx, maxy: out.spec.b.maxy,
                       simulationRevision: simulationRevision, simulationStartRevision: simulationStartRevision };
     rt3dNormalActive=true;
+    // Stage 10B: mirror the single-floor result into the multi-floor store so
+    // the dev/standalone path and the active-floor view stay consistent.
+    rt3dAuth2D={ floors:[{ floorId:fl.id, floorIndex:floorIndex, spec:out.spec,
+      planeZ:out.planeZ, best:out.best, valid:out.valid, canvas:rt3dNormalCanvas,
+      meta:{ minx:out.spec.b.minx, miny:out.spec.b.miny,
+             maxx:out.spec.b.maxx, maxy:out.spec.b.maxy } }],
+      meta:{ simulationRevision:simulationRevision,
+             simulationStartRevision:simulationStartRevision } };
     rt3dExpLastCoverageUi=ui;
     ui.finished=true;
     // Final toast with summary
@@ -9403,6 +9459,19 @@ function rt3dVolumeRequestFloors(activeFloor){
     out.push({ floorIndex:fi, spec:rt3dVolumeSpec(f), zs:rt3dVolumePlanes(fi) });
   }
   return out;
+}
+// Whole-project simulation request (Stage 10B): the active floor selects the
+// VIEW, never the scope. Every floor gets its canonical fine 2D receiver
+// slice plus its canonical 3D volume planes (0.48 m x 8, receiver included).
+function rt3dProjectRequest(){
+  const twoD=[], vol=[];
+  for(let fi=0;fi<state.floors.length;fi++){
+    const f=state.floors[fi]; if(!f) continue;
+    twoD.push({ floorIndex:fi, spec:rt3dGridSpec(f),
+                planeZ:rt3dReceiverPlaneZForFloor(fi) });
+    vol.push({ floorIndex:fi, spec:rt3dVolumeSpec(f), zs:rt3dVolumePlanes(fi) });
+  }
+  return { twoD:twoD, volFloors:vol };
 }
 function updateVolStatus(){
   const el=$('#volStatus');
@@ -9802,18 +9871,246 @@ function runVolumeCoverage(opts){
 }
 
 // ============================================================
+//  STAGE 10B — WHOLE-PROJECT COVERAGE RUN
+//
+//  One worker job evaluates the complete project task list (fine 2D slices
+//  plus volume planes for EVERY floor) against one snapshot built once.
+//  The card below is product-oriented: task, percent, cells, rate, elapsed,
+//  ETA, phase checklist, minimize/cancel. It never names engines.
+// ============================================================
+// Atomic commit of a finished project COMPLETE into the retained product
+// stores (authoritative 2D per floor + multi-floor volume). Pure with
+// respect to product state: it never flips SIMULATED and never draws --
+// the caller (orchestrator commit or dev-direct path) owns that. Canvas
+// painting reuses rt3dExpPaint per floor, exactly like the 2D pipeline.
+function rt3dProjectCommit(payload, snapshotState, revision){
+  const idOf=fi=>snapshotState.floors[fi].id;
+  let mx=-1;
+  const twoD=(payload.twoD||[]).map(rec=>{
+    if(rec.floorIndex>mx)mx=rec.floorIndex;
+    return { floorId:idOf(rec.floorIndex), floorIndex:rec.floorIndex,
+      spec:rec.spec, planeZ:rec.planeZ, best:rec.grid.best, valid:rec.grid.valid,
+      canvas:rt3dExpPaint({spec:rec.spec, grid:{best:rec.grid.best}}),
+      meta:{ minx:rec.spec.b.minx, miny:rec.spec.b.miny,
+             maxx:rec.spec.b.maxx, maxy:rec.spec.b.maxy } };
+  });
+  const wblist=payload.floors||[];
+  rt3dAuth2D={ floors:twoD,
+    meta:{ simulationRevision:revision, simulationStartRevision:revision,
+           sources:payload.sources } };
+  rt3dVolume={
+    maxFloorIndex: mx,
+    floors: wblist.map(W=>{
+      if(W.floorIndex>mx)mx=W.floorIndex;
+      return { floorId:idOf(W.floorIndex), floorIndex:W.floorIndex,
+        elev:floorElevation(W.floorIndex),
+        spec:W.spec, zs:W.planeZs.slice(),
+        planes:W.planes.map(p=>({ planeZ:p.planeZ, best:p.grid.best,
+          apBest:p.grid.apBest, valid:p.grid.valid,
+          evaluatedCells:p.evaluatedCells, validCells:p.validCells,
+          noSignalCells:p.noSignalCells, diagnostics:p.diagnostics })) };
+    }),
+    meta:{ simulationRevision:revision, simulationStartRevision:revision,
+           sources:payload.sources }
+  };
+  rt3dVolume.maxFloorIndex=mx;
+  auth2DSyncView();
+}
+function runProjectCoverage(opts){
+  opts=opts||{};
+  // DO NOT clear previous valid results - they stand until commit replaces them.
+  const t0=performance.now();
+  const simulationStartRevision=opts.simulationStartRevision!=null?opts.simulationStartRevision:(rfRevision||0);
+  const twoD=opts.twoD||[], volFloors=opts.volFloors||[];
+  const ui={ phases:[], cur:'snapshot', lastT:t0, firstCellMs:null,
+             cancelled:false, finished:false, cells:0,
+             total:twoD.reduce((a,D)=>a+D.spec.cols*D.spec.rows,0)+
+                   volFloors.reduce((a,F)=>a+F.spec.cols*F.spec.rows*F.zs.length,0),
+             cellsPerSec:null, minimized:false, task:null };
+  const toastEl=$('#toast');
+  function onToastClick(e){
+    const btn=(e&&e.target&&e.target.closest)?e.target.closest('[data-action]'):null;
+    if(!btn) return;
+    const action=btn.getAttribute('data-action');
+    if(action==='minimize') ui.minimized=true;
+    else if(action==='restore') ui.minimized=false;
+    else if(action==='cancel'){
+      ui.cancelled=true;
+      if(rt3dVolumeJob) rt3dVolumeJob.cancel();
+    }
+    else return;
+    render();
+  }
+  if(toastEl) toastEl.addEventListener('click', onToastClick);
+  const phase=(next)=>{
+    const now=performance.now();
+    ui.phases.push({ name:ui.cur, ms:+(now-ui.lastT).toFixed(2) });
+    ui.cur=next; ui.lastT=now;
+    render();
+  };
+  const phaseLabels={ snapshot:'rt3d.cov.phase.snapshot', world:'rt3d.cov.phase.world',
+    bvh:'rt3d.cov.phase.bvh', init:'rt3d.cov.phase.init', evaluate:'rt3d.cov.phase.evaluate',
+    finalize:'rt3d.cov.phase.finalize', paint:'rt3d.cov.phase.paint' };
+  const render=()=>{
+    const total=Math.max(1,ui.total);
+    const frac=Math.min(1,ui.cells/total);
+    const now=performance.now();
+    const el=Math.round(now-t0);
+    const rate=(el>40&&ui.cells>0)?Math.round(ui.cells/(el/1000)):null;
+    const eta=(rate&&ui.cells>0&&ui.total>ui.cells)?Math.max(0,Math.round((ui.total-ui.cells)/rate)):null;
+    const pct=(100*frac).toFixed(1);
+    let L=[];
+    L.push('<div style="width:410px;max-width:94vw">');
+    if(ui.minimized){
+      L.push('<div class="rt3dh2" style="margin:0">'+escapeHtml(t('auth.simulating'))+
+        ' · '+pct+'%</div>');
+      L.push('<button class="tbtn" data-action="restore" style="width:100%;margin-top:6px">'+
+        escapeHtml(t('common.restore'))+'</button>');
+    }else{
+      L.push('<div class="rt3dh2">'+escapeHtml(t('auth.simulating'))+'</div>');
+      if(ui.task)
+        L.push('<div class="rt3dr"><span>'+escapeHtml(t('auth.task'))+'</span><b>'+
+          escapeHtml(t(ui.task.kind==='slice2d'?'auth.task2d':'auth.taskVol',
+            {i:ui.task.i+1,n:ui.task.n}))+'</b></div>');
+      L.push('<div style="font-size:22px;margin:2px 0"><b>'+pct+'%</b></div>');
+      L.push('<progress max="1" value="'+frac+'" style="width:100%"></progress>');
+      if(ui.cur==='evaluate'){
+        L.push('<div class="rt3dr"><span>'+escapeHtml(t('auth.cells'))+'</span><b>'+
+          ui.cells.toLocaleString()+' / '+ui.total.toLocaleString()+'</b></div>');
+        if(rate) L.push('<div class="rt3dr"><span>'+escapeHtml(t('auth.rate'))+'</span><b>'+
+          rate.toLocaleString()+' '+t('rt3d.cov.rateUnit')+'</b></div>');
+        L.push('<div class="rt3dr"><span>'+escapeHtml(t('auth.elapsed'))+'</span><b>'+
+          (el>=1000?(el/1000).toFixed(1)+' s':el+' ms')+'</b></div>');
+        if(eta!=null) L.push('<div class="rt3dr"><span>'+escapeHtml(t('auth.eta'))+'</span><b>'+
+          (eta>=60?Math.round(eta/60)+' min':eta+' s')+'</b></div>');
+      }
+      const allPhases=['snapshot','world','bvh','init','evaluate','finalize','paint'];
+      L.push('<div class="rt3dn" style="margin-top:4px;font-size:10px">');
+      for(const pn of allPhases){
+        const done=ui.phases.some(p=>p.name===pn);
+        const current=ui.cur===pn;
+        const icon=done?'✓':(current?'●':'○');
+        L.push('<div style="margin:1px 0"><span style="color:'+
+          (current?'#34d6c4':(done?'#34d6c4':'#7d8a9c'))+'">'+icon+'</span> '+escapeHtml(t(phaseLabels[pn]||pn))+'</div>');
+      }
+      L.push('</div>');
+      if(!ui.finished&&!ui.cancelled){
+        L.push('<div style="display:flex;gap:6px;margin-top:8px">');
+        if(!ui.minimized)
+          L.push('<button class="tbtn" data-action="minimize" style="flex:1">'+
+            escapeHtml(t('common.minimize'))+'</button>');
+        L.push('<button class="tbtn" data-action="cancel" style="flex:1;background:rgba(239,95,95,.1);border-color:rgba(239,95,95,.5);color:#ef5f5f">'+
+          escapeHtml(t('common.cancel'))+'</button>');
+        L.push('</div>');
+      }else if(ui.cancelled){
+        L.push('<div class="rt3dwarn" style="margin-top:8px">'+
+          escapeHtml(t('volume.cancelled'))+'</div>');
+      }
+    }
+    L.push('</div>');
+    showToast(true,{html:L.join('')});
+  };
+  render();
+
+  const snapshot={
+    state: opts.snapshotState,
+    twoD: twoD,
+    floors: volFloors
+  };
+
+  phase('world');
+  phase('bvh');
+  phase('init');
+  phase('evaluate');
+
+  const publish=(payload)=>{
+    phase('paint');
+    // Stage 10A rule, whole-project scope: a superseded run or a mid-run RF
+    // edit must never publish.
+    if(opts.runId!=null&&(opts.runId!==authRunId||(rfRevision||0)!==simulationStartRevision)){
+      ui.finished=true; return;
+    }
+    rt3dProjectCommit(payload, opts.snapshotState, simulationStartRevision);
+    ui.finished=true;
+    updateSimStatus(); updateVolStatus();
+    if(opts.onDone){ opts.onDone(payload); return; }
+    // Direct (dev/console) runs: a finished result becomes visible.
+    productState='SIMULATED'; showAuthoritative=true;
+    updateCoverageToggle(); draw2d(); if(view==='3d')build3d();
+  };
+  const abort=()=>{
+    ui.finished=true;
+    if(toastEl) toastEl.removeEventListener('click', onToastClick);
+    // Deliberately NO publish: the last valid result stands untouched.
+    showToast(false,{html:
+      '<div class="rt3dwarn"><b>'+escapeHtml(t('volume.cancelled'))+'</b><br>'+
+      escapeHtml(t('rt3d.cov.cancelledKeep'))+'</div>'
+    });
+    if(opts.onAbort) opts.onAbort();
+  };
+  const workerError=(message)=>{
+    ui.finished=true;
+    if(toastEl) toastEl.removeEventListener('click', onToastClick);
+    showToast(false,{html:
+      '<div class="rt3dwarn"><b>'+escapeHtml(t('rt3d.cov.workerError'))+'</b><br>'+
+      escapeHtml(message)+'<br>'+escapeHtml(t('rt3d.cov.cancelledKeep'))+'</div>'
+    });
+    if(opts.onAbort) opts.onAbort(message);
+  };
+  const finish=(payload)=>{
+    phase('finalize');
+    if(toastEl) toastEl.removeEventListener('click', onToastClick);
+    publish(payload);
+  };
+
+  let jobId;
+  try{
+    jobId=rt3dExpWorkerStartVolume(snapshot,{
+      onProgress:(m)=>{
+        if(rt3dVolumeJob&&rt3dVolumeJob.id!==m.jobId) return;
+        ui.cells=m.evaluatedCells;
+        if(m.kind) ui.task={kind:m.kind,i:m.kindIndex||0,n:m.kindTotal||1};
+        if(ui.firstCellMs===null&&m.evaluatedCells>0)
+          ui.firstCellMs=+(performance.now()-t0).toFixed(1);
+        render();
+      },
+      onComplete:(m)=>{
+        if(rt3dVolumeJob&&rt3dVolumeJob.id!==m.jobId) return;
+        finish(m);
+      },
+      onCancelled:(m)=>{
+        if(rt3dVolumeJob&&rt3dVolumeJob.id!==m.jobId) return;
+        abort();
+      },
+      onError:(m)=>{
+        if(rt3dVolumeJob&&rt3dVolumeJob.id!==m.jobId) return;
+        workerError(m.message);
+      }
+    });
+  }catch(err){
+    workerError(String(err&&err.message?err.message:err));
+    return;
+  }
+  rt3dVolumeJob={ id:jobId,
+    cancel(){
+      ui.cancelled=true;
+      ui.finished=true;
+      rt3dExpWorkerCancel(jobId);
+    } };
+}
+
+// ============================================================
 //  STAGE 10A — UNIFIED AUTHORITATIVE COVERAGE ORCHESTRATOR
 //
-//  ONE user operation ("Simular cobertura") runs the two canonical
-//  pipelines sequentially against ONE shared snapshot/revision: the 2D
-//  slice first, then the multi-floor volume. No RF math lives here; both
-//  stages call the exact same runSimulateCoverage()/runVolumeCoverage()
-//  code paths, only in staged mode. Atomicity comes from visibility
-//  gating, not from a second result store: staged publishes write the
-//  normal live structures, but nothing renders until the orchestrator
-//  commits SIMULATED (draw paths consult authVisible()). A superseded run
-//  or a mid-run RF edit can therefore never surface a partial product --
-//  the live previous result (if any) simply stands until commit or discard.
+//  ONE user operation ("Simular cobertura") runs ONE worker job over the
+//  whole project (Stage 10B): fine 2D slices plus volume planes for EVERY
+//  floor, all against ONE shared snapshot/revision. No RF math lives here.
+//  Atomicity comes from visibility gating, not from a second result store:
+//  the project publish writes the normal live structures, but nothing
+//  renders until the orchestrator commits SIMULATED (draw paths consult
+//  authVisible()). A superseded run or a mid-run RF edit can therefore never
+//  surface a partial product -- the live previous result (if any) simply
+//  stands until commit or discard.
 // ============================================================
 function runAuthoritativeCoverage(){
   // Supersede anything in flight; the worker serves one job.
@@ -9822,6 +10119,7 @@ function runAuthoritativeCoverage(){
   const runId=++authRunId;
   const revision=rfRevision||0;
   const snapshotState=JSON.parse(JSON.stringify(state, (k,v)=> (k==='_img'||k==='rfRevision'||k==='simulationRevision'||k==='simulationStartRevision'||k==='isCurrent') ? undefined : v));
+  const req=rt3dProjectRequest();
   const alive=()=>runId===authRunId&&(rfRevision||0)===revision;
   productState='SIMULATING';
   updateCoverageToggle(); draw2d(); if(view==='3d')build3d();  // hide preview immediately
@@ -9829,34 +10127,24 @@ function runAuthoritativeCoverage(){
     if(runId!==authRunId) return;
     // The previous live result (if any) was never touched: keep showing it
     // only when the design is unchanged, otherwise fall back to DESIGN.
-    if(rt3dNormalActive&&rt3dVolume&&(rfRevision||0)===revision){
+    if(rt3dAuth2D&&rt3dVolume&&(rfRevision||0)===revision){
       productState='SIMULATED'; showAuthoritative=true;
     }else{
       productState='DESIGN';
     }
     updateCoverageToggle(); scheduleHeat(); draw2d(); if(view==='3d')build3d();
   };
-  runSimulateCoverage({ staged:true, runId:runId, snapshotState:snapshotState,
+  runProjectCoverage({ runId:runId, snapshotState:snapshotState,
     simulationStartRevision:revision,
+    twoD:req.twoD, volFloors:req.volFloors,
     onAbort:abortAll,
-    onDone:()=>{
+    onDone:(payload)=>{
       if(!alive()){ abortAll(); return; }
-      runVolumeCoverage({ staged:true, runId:runId, snapshotState:snapshotState,
-        simulationStartRevision:revision,
-        onAbort:abortAll,
-        onDone:(payload)=>{
-          if(!alive()){ abortAll(); return; }
-          productState='SIMULATED'; showAuthoritative=true;
-          updateCoverageToggle(); draw2d(); if(view==='3d')build3d();
-          let nPlanes=0;
-          const wb=payload.multi?payload.floors:[{planes:payload.planes}];
-          for(const W of wb) nPlanes+=W.planes.length;
-          showToast(false,{html:
-            '<div class="rt3dh2">'+escapeHtml(t('volume.title'))+'</div>'+
-            '<div class="rt3dn">'+escapeHtml(t('volume.done',{planes:nPlanes,
-              cells:payload.evaluatedCells}))+'</div>'
-          });
-        }});
+      productState='SIMULATED'; showAuthoritative=true;
+      updateCoverageToggle(); draw2d(); if(view==='3d')build3d();
+      showToast(false,{html:
+        '<div class="rt3dh2">'+escapeHtml(t('auth.done',{floors:req.twoD.length}))+'</div>'
+      });
     }});
 }
 
@@ -16498,10 +16786,11 @@ function duplicateFloor(i){
 function setActiveFloor(i){
   state.activeFloor=i; select(null); buildFloors(); updateChips(); syncFloorPanel();
   clearFootprintDiagnostics();   // the markers belong to the floor you left
-  rt3dNormalActive=false; rt3dNormalCanvas=null; rt3dNormalMeta=null; rt3dNormalSpec=null;  // normal RT3D result is floor-specific
-  // Stage 9C: a floor switch is NOT an RF edit. The retained multi-floor
-  // volume stays valid and rendering shows the subset floors 0..activeFloor;
-  // freshness (revision + coverage) is re-evaluated for the new cutaway.
+  // Stage 10B: a floor switch is NOT an RF edit and never recalculates. The
+  // active-floor 2D view syncs from the retained multi-floor store (no entry
+  // for this floor simply leaves the view empty); the volume subset rule is
+  // unchanged. Freshness is re-evaluated for the new cutaway.
+  auth2DSyncView();
   updateVolStatus();
   scheduleHeat();
   if(view==='3d') build3d();
@@ -17727,6 +18016,7 @@ function loadProject(file){
       // back to DESIGN with preview available, like a fresh load.
       rt3dVolume=null; volumePlanes3d=[]; clearCloudMesh();
       rt3dNormalActive=false; rt3dNormalCanvas=null; rt3dNormalMeta=null; rt3dNormalSpec=null;
+      rt3dAuth2D=null;
       productState='DESIGN'; showAuthoritative=true;
       updateCoverageToggle();
       bootUI(); scheduleHeat();

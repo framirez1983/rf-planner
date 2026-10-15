@@ -83,25 +83,24 @@ main.run(`productState='DESIGN'; showAuthoritative=true;`);
 // C. Orchestrator: one snapshot, chained stages, guarded publishes
 // ---------------------------------------------------------------
 const orch = fnSegment('runAuthoritativeCoverage', 'STAGE 9B');
-check(8, 'one orchestrator sequences the two canonical pipelines',
-  !!orch && orch.includes('runSimulateCoverage({ staged:true') &&
-    orch.includes('runVolumeCoverage({ staged:true'),
-  'orchestrator missing or not staged');
-check(9, 'both stages share one snapshot object and one launch revision',
+check(8, 'one orchestrator launches one whole-project job',
+  !!orch && orch.includes('runProjectCoverage({ runId:runId') &&
+    orch.includes('twoD:req.twoD, volFloors:req.volFloors'),
+  'orchestrator missing or not project-scoped');
+check(9, 'the project job shares one snapshot object and one launch revision',
   !!orch && orch.includes('snapshotState:snapshotState') &&
-    orch.indexOf('snapshotState:snapshotState') !==
-    orch.lastIndexOf('snapshotState:snapshotState') &&
-    orch.includes('simulationStartRevision:revision'),
+    orch.includes('simulationStartRevision:revision') &&
+    orch.includes('rt3dProjectRequest()'),
   'stages could diverge onto different designs');
-check(10, 'staged publishes are revision/generation guarded',
+check(10, 'project publish is revision/generation guarded',
   CODE.includes('opts.runId!==authRunId') && CODE.includes('opts.onDone') &&
     CODE.includes('opts.onAbort'),
   'stale staged results could publish');
 check(11, 'preview hides the moment simulation starts (SIMULATING first)',
   !!orch && orch.indexOf("productState='SIMULATING'") <
-    orch.indexOf('runSimulateCoverage({ staged:true'),
+    orch.indexOf('runProjectCoverage({ runId:runId'),
   'preview visible during startup');
-check(12, 'commit requires both stages, the same run and a clean revision',
+check(12, 'commit requires the full COMPLETE, the same run and a clean revision',
   !!orch && orch.includes("productState='SIMULATED'") &&
     orch.includes('runId!==authRunId') && orch.includes('abortAll'),
   'partial result could go product-valid');

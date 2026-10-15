@@ -148,7 +148,7 @@ assert(errSection.includes('removeEventListener'), 'workerError() removes delega
 // path — the same invariant, per run function rather than file-global.
 const onToastClickCount = (html.match(/onToastClick\)/g) || []).length;
 assert(onToastClickCount >= 8, `one attach + three removes per run path (found ${onToastClickCount})`);
-const volSection = html.substring(html.indexOf('function runVolumeCoverage'), html.indexOf('const RT3D_AUDIT_TRUTH_HIERARCHY'));
+const volSection = html.substring(html.indexOf('function runVolumeCoverage'), html.indexOf('\n//  STAGE 10B'));
 const simAdd = (runSimSection.match(/toastEl\.addEventListener/g) || []).length;
 const simRem = (runSimSection.match(/toastEl\.removeEventListener/g) || []).length;
 const volAdd = (volSection.match(/toastEl\.addEventListener/g) || []).length;
@@ -165,9 +165,9 @@ assert(runSimSection.includes('rt3dExpWorkerCancel'), 'cancels via canonical wor
 assert(runSimSection.includes('rt3dExpWorkerCancel(jobId)'), 'worker cancel scoped to jobId');
 
 // 22. Minimize/Restore must NOT touch Worker execution (one minimize +
-// restore line per delegated handler: slice path and volume path)
+// restore line per delegated handler: slice, volume and project cards)
 const minimizeLines = html.split('\n').filter(l => l.includes("action==='minimize'") || l.includes("action==='restore'"));
-assert(minimizeLines.length === 4, 'minimize and restore handled in delegated handlers');
+assert(minimizeLines.length === 6, 'minimize and restore handled in delegated handlers');
 for (const line of minimizeLines) assertNot(line.includes('cancel') || line.includes('Worker'), 'minimize/restore does not touch Worker');
 
 // 23. Progress re-render safety: render() re-paints the card every PROGRESS event

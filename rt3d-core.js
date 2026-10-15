@@ -294,14 +294,16 @@
           var sources = env.run('rt3dCoverageSources()');
           job.snapshot.sources = sources;
 
-          // --- Stage 9C multi-floor volume path ------------------------------
-          // A RUN_VOLUME snapshot carries either the legacy single-floor
-          // `{spec, zs}` or the multi-floor `{floors:[{floorIndex,spec,zs}]}`.
-          // Either way the world, BVH and sources built ONCE above are reused
-          // for every plane of every floor; each plane is evaluated by the
-          // SAME rt3dCoverageSlice() call the single-slice path uses, with its
-          // own resumable cursor and stats. No RF math lives here: this is
-          // only scheduling around the canonical engine function.
+          // --- Stage 10B project volume path --------------------------------
+          // A RUN_VOLUME snapshot carries any combination of:
+          //   floors: [{floorIndex,spec,zs}]            volumetric planes
+          //   twoD:   [{floorIndex,spec,planeZ}]         fine receiver slices
+          // (plus the legacy single-floor `{spec,zs}` shape, kept working).
+          // The world, BVH and sources built ONCE above are reused for every
+          // task of every floor; each task is evaluated by the SAME
+          // rt3dCoverageSlice() call the single-slice path uses, with its own
+          // resumable cursor and stats. No RF math lives here: this is only
+          // scheduling around the canonical engine function.
           var volFloors = null, volLegacy = false;
           if (job.snapshot.floors && job.snapshot.floors.length) {
             volFloors = job.snapshot.floors.map(function (F) {
@@ -312,15 +314,31 @@
             volFloors = [{ floorIndex: job.snapshot.floorIndex || 0,
                            spec: job.snapshot.spec, zs: job.snapshot.zs.slice() }];
           }
-          if (volFloors && volFloors.length) {
+          var twoDList = (job.snapshot.twoD && job.snapshot.twoD.length)
+            ? job.snapshot.twoD.map(function (D) {
+                return { floorIndex: D.floorIndex, spec: D.spec, planeZ: D.planeZ };
+              }) : [];
+          if (!volFloors) volFloors = [];
+          if (volFloors.length || twoDList.length) {
             job.snapshot.backend = opts.backend || 'bvh';
             job.snapshot.chunkMs = chunkMs;
-            // One task per (floor, plane); per-floor specs may differ in size.
+            // One task per 2D slice first, then one task per (floor, plane).
+            // Per-floor specs may differ in size: 2D uses the fine canonical
+            // grid while volume planes use the coarser display grid.
             var tasks = [];
+            twoDList.forEach(function (D, di) {
+              tasks.push({ kind: 'slice2d', f: -1, floorIndex: D.floorIndex,
+                           spec: D.spec, planeZ: D.planeZ,
+                           n: D.spec.cols * D.spec.rows,
+                           kindIndex: di, kindTotal: twoDList.length,
+                           planeIndex: 0, numPlanes: 1 });
+            });
             volFloors.forEach(function (F, fi) {
               var tn = F.spec.cols * F.spec.rows;
               F.zs.forEach(function (z, pi) {
-                tasks.push({ f: fi, spec: F.spec, planeZ: z, n: tn,
+                tasks.push({ kind: 'vol', f: fi, floorIndex: F.floorIndex,
+                             spec: F.spec, planeZ: z, n: tn,
+                             kindIndex: fi, kindTotal: volFloors.length,
                              planeIndex: pi, numPlanes: F.zs.length });
               });
             });
@@ -382,7 +400,6 @@
               if (isStale()) { reportCancelled(); return; }
               try {
                 var ti = job.snapshot.taskIndex, T = tasks[ti];
-                var F = volFloors[T.f];
                 job.snapshot.cursor = job.snapshot.taskCursors[ti];
                 job.snapshot.stats = job.snapshot.taskStats[ti];
                 job.snapshot.spec = T.spec;
@@ -401,7 +418,8 @@
                     evaluatedCells: volDone,
                     totalCells: volTotal,
                     percent: volTotal ? volDone / volTotal : 1,
-                    floorIndex: F.floorIndex, numFloors: volFloors.length,
+                    kind: T.kind, kindIndex: T.kindIndex, kindTotal: T.kindTotal,
+                    floorIndex: T.floorIndex, numFloors: volFloors.length,
                     planeIndex: T.planeIndex, numPlanes: T.numPlanes,
                     planeZ: T.planeZ
                   });
@@ -421,10 +439,10 @@
                   return;
                 }
 
-                // Every floor finished: publish exactly one COMPLETE.
+                // Every task finished: publish exactly one COMPLETE.
                 volTransfer = [];
                 var volPayload = null;
-                if (volLegacy) {
+                if (volLegacy && !twoDList.length) {
                   volPayload = {
                     type: MSG.COMPLETE,
                     jobId: jobId,
@@ -438,20 +456,31 @@
                   };
                 } else {
                   var perFloor = volFloors.map(function () { return []; });
+                  var twoDPayload = [];
                   job.snapshot.taskResults.forEach(function (sr, k) {
-                    perFloor[tasks[k].f].push(volPlanePayload(sr));
+                    if (tasks[k].kind === 'slice2d') {
+                      var D = twoDList[tasks[k].kindIndex];
+                      var rec = volPlanePayload(sr);
+                      rec.spec = volSpecPayload(D.spec);
+                      rec.floorIndex = D.floorIndex;
+                      twoDPayload.push(rec);
+                    } else {
+                      perFloor[tasks[k].f].push(volPlanePayload(sr));
+                    }
                   });
                   volPayload = {
                     type: MSG.COMPLETE,
                     jobId: jobId,
                     volume: true,
                     multi: true,
+                    project: twoDList.length > 0,
                     floors: volFloors.map(function (F2, fi) {
                       return { floorIndex: F2.floorIndex,
                                spec: volSpecPayload(F2.spec),
                                planeZs: F2.zs.slice(),
                                planes: perFloor[fi] };
                     }),
+                    twoD: twoDPayload,
                     evaluatedCells: volTotal,
                     totalCells: volTotal,
                     sources: volSourcesPayload()
