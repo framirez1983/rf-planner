@@ -7338,19 +7338,68 @@ function rt3dExpBin(samples, spec, apSlotOf){
 }
 
 // ------------------------------------------------------------
-//  PAINTING — direct cell to pixel, no smoothing of any kind.
+//  PAINTING — scalar display interpolation (Stage 10D).
+//
+//  Exact Coverage samples are bilinearly interpolated in DISPLAY space and
+//  only then passed through the application's own rssiColor(), so diagonal
+//  transitions render in the right hues instead of stair-stepping or
+//  muddying through color-space blur. Interpolation happens ONLY where all
+//  four bracketing samples are valid; boundaries fall back to the nearest
+//  exact sample, and unsampled cells stay fully transparent (a hole reads
+//  as a hole, never as fabricated weak signal).
 //
 //  Deliberately NOT paintHeat(): that function honours
 //  editorPrefs.heatmapSmoothing and any value above zero makes it bilinearly
-//  interpolate and then Gaussian-blur the grid. Feeding an RT3D grid to it
-//  would silently invent values between samples, which this stage is forbidden
-//  to do. Colour comes from the application's own rssiColor(), so there is no
-//  second colour interpretation.
-//
-//  Unsampled cells keep -Infinity and are written fully transparent, which is
-//  why "no RT3D sample reached here" shows as a hole rather than as a
-//  fabricated weak reading.
+//  interpolate and then Gaussian-blur the grid -- a user preference for the
+//  fast preview, not a second colour interpretation. The stored RF arrays are
+//  only ever read here, never modified.
 // ------------------------------------------------------------
+// Display oversampling for authoritative raster presentation: how many
+// display pixels are evaluated between exact Coverage samples. The RF grid
+// itself is never resampled. No Gaussian/box/CSS blur anywhere.
+const RT3D_DISPLAY_SCALE = 2;
+// Scalar bilinear sample of an RSSI field at grid coordinates (gx,gy).
+// Conservative at validity boundaries: interpolation happens ONLY when all
+// four bracketing samples are finite; otherwise the nearest sample is shown
+// exactly (or transparent when even that is invalid). Never invents coverage
+// across holes, excluded regions or no-signal areas. Pure: reads the grid,
+// calls no RF, writes nothing.
+function rt3dBilinearSample(best, cols, rows, gx, gy){
+  if(!(cols>0)||!(rows>0)||!best||best.length<cols*rows) return -Infinity;
+  gx=clamp(gx,0,cols-1); gy=clamp(gy,0,rows-1);
+  const x0=clamp(Math.floor(gx),0,cols-1), y0=clamp(Math.floor(gy),0,rows-1);
+  const x1=Math.min(cols-1,x0+1), y1=Math.min(rows-1,y0+1);
+  const v00=best[y0*cols+x0], v10=best[y0*cols+x1];
+  const v01=best[y1*cols+x0], v11=best[y1*cols+x1];
+  if(Number.isFinite(v00)&&Number.isFinite(v10)&&
+     Number.isFinite(v01)&&Number.isFinite(v11)){
+    const tx=gx-x0, ty=gy-y0;
+    return v00*(1-tx)*(1-ty)+v10*tx*(1-ty)+v01*(1-tx)*ty+v11*tx*ty;
+  }
+  const nx=clamp(Math.round(gx),0,cols-1), ny=clamp(Math.round(gy),0,rows-1);
+  const nv=best[ny*cols+nx];
+  return Number.isFinite(nv)?nv:-Infinity;
+}
+// Display raster for one exact scalar field: interpolated RSSI values through
+// colorFn(), scaled by RT3D_DISPLAY_SCALE. The input array is only read and
+// keeps every sample bit-identical.
+function rt3dPaintSmooth(best, cols, rows, colorFn){
+  const scale=RT3D_DISPLAY_SCALE;
+  const W=Math.max(1,cols*scale), H=Math.max(1,rows*scale);
+  const c=document.createElement('canvas');
+  c.width=W; c.height=H;
+  const cc=c.getContext('2d');
+  const img=cc.createImageData(W,H);
+  const d=img.data;
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+    const v=rt3dBilinearSample(best, cols, rows, (x+0.5)/scale-0.5, (y+0.5)/scale-0.5);
+    const col=Number.isFinite(v)?colorFn(v):[0,0,0,0];
+    const o=(y*W+x)*4;
+    d[o]=col[0]; d[o+1]=col[1]; d[o+2]=col[2]; d[o+3]=col[3];
+  }
+  cc.putImageData(img,0,0);
+  return c;
+}
 function rt3dExpPaint(result){
   // The result owns the grid specification. Passing the grid alone used to be
   // enough because the grid carried a spec; now it does not, and that is the
@@ -7362,20 +7411,7 @@ function rt3dExpPaint(result){
   const W=spec.cols, H=spec.rows;
   if(!grid || grid.best.length!==W*H)
     throw new Error('rt3d: grid size does not match its spec');
-  const c=document.createElement('canvas');
-  c.width=W; c.height=H;
-  const cc=c.getContext('2d');
-  const img=cc.createImageData(W,H);
-  const d=img.data;
-  const best=grid.best;
-  for(let k=0;k<W*H;k++){
-    const v=best[k], o=k*4;
-    if(!(v>-Infinity)){ d[o]=0; d[o+1]=0; d[o+2]=0; d[o+3]=0; continue; }
-    const col=rssiColor(v);
-    d[o]=col[0]; d[o+1]=col[1]; d[o+2]=col[2]; d[o+3]=col[3];
-  }
-  cc.putImageData(img,0,0);
-  return c;
+  return rt3dPaintSmooth(grid.best, W, H, rssiColor);
 }
 
 // ------------------------------------------------------------
