@@ -527,7 +527,7 @@ function run(ctx, code) {
 }
 
 // --- Test 19: AP canvas-drag path invalidates (drag-end, one increment) ---
-// Browser evidence: dragging AP WH78-001 left the badge CURRENT. The
+// Browser evidence: dragging AP AP-001 left the badge CURRENT. The
 // pointermove handler mutated ap.x/ap.y + scheduleHeat (quick preview) but
 // never reached markRfChanged(). Fixed at drag-end in pointerup.
 {
@@ -548,7 +548,7 @@ function run(ctx, code) {
   // Behavioural: CURRENT -> drag-path mutation -> STALE, canvas retained.
   const ctx = createEnv();
   run(ctx, `
-    state.floors[0].aps = [{ id: 'WH78-001', x: 5, y: 5 }];
+    state.floors[0].aps = [{ id: 'AP-001', x: 5, y: 5 }];
     rt3dNormalActive = true;
     rt3dNormalCanvas = { width: 100, height: 100 };
     rt3dNormalMeta = { simulationRevision: 0, simulationStartRevision: 0 };
@@ -562,7 +562,7 @@ function run(ctx, code) {
   // drag-end markRfChanged() (pointerup), only because position changed.
   run(ctx, `
     (() => {
-      const ap = state.floors[0].aps.find(a => a.id === 'WH78-001');
+      const ap = state.floors[0].aps.find(a => a.id === 'AP-001');
       const sx = ap.x, sy = ap.y;
       ap.x = 8.25; ap.y = 6.5; // visibly different XY, as in the smoke test
       if (ap.x !== sx || ap.y !== sy) __TEST_MARK_RF_CHANGED__();
@@ -578,7 +578,7 @@ function run(ctx, code) {
   // Click without move must NOT invalidate.
   const ctx2 = createEnv();
   run(ctx2, `
-    state.floors[0].aps = [{ id: 'WH78-001', x: 5, y: 5 }];
+    state.floors[0].aps = [{ id: 'AP-001', x: 5, y: 5 }];
     rt3dNormalActive = true;
     rt3dNormalCanvas = { width: 100, height: 100 };
     rt3dNormalMeta = { simulationRevision: 1, simulationStartRevision: 1 };
@@ -587,7 +587,7 @@ function run(ctx, code) {
   const r0 = run(ctx2, '__TEST_STATE__().rfRevision');
   run(ctx2, `
     (() => {
-      const ap = state.floors[0].aps.find(a => a.id === 'WH78-001');
+      const ap = state.floors[0].aps.find(a => a.id === 'AP-001');
       if (ap.x !== 5 || ap.y !== 5) __TEST_MARK_RF_CHANGED__(); // no movement
     })();
   `);

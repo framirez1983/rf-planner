@@ -201,7 +201,10 @@ console.log('Stage 5 result / grid-spec contract (behavioural)\n');
   const spec = r.result && r.result.spec;
   const c = r.canvas;
   check(5, 'painting completes without throwing and the canvas matches the result spec',
-    r.error === null && !!c && c.width === spec.cols && c.height === spec.rows,
+    // Stage 10D (accepted): the display raster oversamples the RF grid by
+    // RT3D_DISPLAY_SCALE (currently 2x) with scalar bilinear interpolation;
+    // bounds and alignment still derive from the same spec.
+    r.error === null && !!c && c.width === spec.cols * 2 && c.height === spec.rows * 2,
     JSON.stringify({ error: r.error, canvas: c && [c.width, c.height],
                      spec: spec && [spec.cols, spec.rows] }));
 }

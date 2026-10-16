@@ -1,12 +1,12 @@
 // Stage 5 performance and coverage on a realistic project size.
 //
-// S4Optik is not available to this harness, so this builds a PROJECT-LIKE
-// multi-floor scene with the same ingredients S4 exercises — a real shell, a
+// Warehouse A is not available to this harness, so this builds a PROJECT-LIKE
+// multi-floor scene with the same ingredients Reference Warehouse exercises — a real shell, a
 // glass partition, pillars, racks at realistic heights, a normal-height
 // Ceiling with holes, a slab with Openings, and APs on two floors — and runs
 // the REAL rt3dExpRun() through it.
 //
-// Treat the absolute numbers as an ORDER OF MAGNITUDE, not as S4 timings:
+// Treat the absolute numbers as an ORDER OF MAGNITUDE, not as Reference Warehouse timings:
 // they carry the Node vm cross-context overhead noted in the earlier benches,
 // they exclude rendering, and the scene is a stand-in. What they do establish
 // is which presets are usable at all, and whether coverage is so sparse that
@@ -38,7 +38,7 @@ function sandbox() {
 }
 
 // A two-floor open-plan office with a service core. Deliberately includes the
-// things the S4 manual test is meant to exercise.
+// things the Reference Warehouse manual test is meant to exercise.
 const PROJECT = `
   state=freshState();
   var M4=state.materials[4].id, M2=state.materials[2].id,
@@ -106,7 +106,7 @@ const shape = JSON.parse(run(sb, `JSON.stringify((function(){
 })())`));
 
 console.log('Stage 5 — experimental RT3D on a realistic project size\n');
-console.log('NOTE: this is a PROJECT-LIKE stand-in for S4Optik, not S4 itself. Absolute');
+console.log('NOTE: this is a PROJECT-LIKE stand-in for Warehouse A, not Reference Warehouse itself. Absolute');
 console.log('timings carry the Node vm cross-context overhead seen in earlier benches');
 console.log('and exclude rendering. Read them as an order of magnitude.\n');
 console.log(`scene: ${shape.bodies} bodies  (${RT3DFAM(shape.byFamily)})`);

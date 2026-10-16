@@ -192,7 +192,7 @@ console.log('Stage 6.5h corrected evidence rules\n');
   const ctx = sandbox();
   run(ctx, `
     ${SCENE}
-    // ONLY wall-mounted omnis: the S4 shape (omni/wall + omni/ceiling)
+    // ONLY wall-mounted omnis: the Reference Warehouse shape (omni/wall + omni/ceiling)
     state.floors[0].aps=[]; state.floors[1].aps=[];
     [[0,0],[6,0]].forEach(function(c,i){
       var a=makeAP(c[0],c[1],'AP-WALL'+(i+1),3.2); a.mount=2.6; a.mountType='wall';

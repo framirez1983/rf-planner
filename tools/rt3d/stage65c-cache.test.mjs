@@ -1,7 +1,7 @@
 // Stage 6.5c: the comparison-snapshot cache contract, driven through the REAL
 // browser integration path (the same functions the page calls, in the same order).
 //
-// This suite exists because the first delta map failed on the real S4/PB run in
+// This suite exists because the first delta map failed on the real Reference Warehouse/PB run in
 // exactly the sequence it was designed for. Every check below is one of the
 // contract's own requirements, exercised end to end rather than in isolation.
 import vm from 'node:vm';

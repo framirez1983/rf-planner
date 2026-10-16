@@ -84,7 +84,7 @@ console.log('Stage 6.5e geometry-only Ceiling rule and rack clearance\n');
     /does have a Ceiling/.test(geo.nameLimitation || ''), String(geo.nameLimitation));
   check(6, 'a NAMED Ceiling resolves under BOTH rules, and no limitation is claimed',
     (() => {
-      run(ctx, "state.floors[0].ceilingAreas[0].name='Cuarto Oscuro';");
+      run(ctx, "state.floors[0].ceilingAreas[0].name='Server Room';");
       const p2 = JSON.parse(run(ctx, 'JSON.stringify(rt3dAuditResolveProbes({}))'));
       const n2 = p2.probes.find(p => p.id === 'namedCeiling');
       const g2 = p2.probes.find(p => p.id === 'ceilingGeometry');

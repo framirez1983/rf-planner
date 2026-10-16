@@ -89,9 +89,9 @@ node tools/rt3d/stage5-bench.mjs   # performance + sample coverage on a project-
 ```
 
 `stage5-bench.mjs` builds a PROJECT-LIKE two-floor scene with the ingredients
-S4 exercises (shell, glass partition, pillars, racks at several heights, a
+Reference Warehouse exercises (shell, glass partition, pillars, racks at several heights, a
 normal-height Ceiling with holes, a slab with Openings, APs on two floors). It is
-a stand-in, not S4Optik: its timings carry the Node vm cross-context overhead
+a stand-in, not Warehouse A: its timings carry the Node vm cross-context overhead
 seen in the other benches and exclude rendering, so read them as an order of
 magnitude.
 
@@ -159,14 +159,14 @@ overshoot from consulting the deadline only every 8 cells.
 **A tally cannot prove exactly-once.** A duplicate and a skipped cell cancel out
 in a count. `stage6-cursor.test.mjs` therefore records the **identity** of every
 visited cell and asserts on the set — `unique === total`, `dup === 0`,
-`missing === 0`. That distinction mattered: the real S4 run reported 61 362 cells
+`missing === 0`. That distinction mattered: the real Reference Warehouse run reported 61 362 cells
 evaluated for a 59 592-cell grid, which a duplicate-per-yield explained exactly
 while skipping nothing at all, so every count-based check still agreed.
 
 ## Stage 6.5: Legacy vs RT3D RF truth audit (development only, `?rt3d=1`)
 
 Stage 6 produced a materially different field from the legacy engine on the real
-S4 project. Internal consistency is not evidence of correctness, so Stage 6.5
+Reference Warehouse project. Internal consistency is not evidence of correctness, so Stage 6.5
 **gathers evidence and changes nothing**.
 
 ### Truth hierarchy — the rule the whole audit is governed by
@@ -241,7 +241,7 @@ whether they do. Where legacy is structurally incapable, divergence is the
 correct outcome and is asserted as such.
 
 Evidence probe locations are **resolved by rule against the live project**, never
-hardcoded — the same rule that finds "near WH94-001" on S4 finds "near the second
+hardcoded — the same rule that finds "near AP-001" on Reference Warehouse finds "near the second
 participating AP" anywhere. A rule that cannot be satisfied returns
 `resolved:false` with a reason. Inventing a coordinate would look like evidence.
 
@@ -266,7 +266,7 @@ rendering. Read them as order of magnitude, never as browser numbers.
 ## Stage 6.5c: the comparison-snapshot cache contract
 
 The first delta-map implementation gated on the **displayed** engine's globals
-(`heatGridRssi` / `heatMeta` / `rt3dExpMeta`). A real S4/PB run failed in exactly
+(`heatGridRssi` / `heatMeta` / `rt3dExpMeta`). A real Reference Warehouse/PB run failed in exactly
 the sequence it was designed for — Legacy, then RT3D, then delta map — for four
 independent reasons:
 
@@ -344,7 +344,7 @@ valid or not. The rule now reads `points` (still accepting `outer`) and reports 
 field it used, the raw point count and whether the ring survived cleaning.
 
 The "no named Ceiling Area" result is a genuine model fact: the rule resolves by name
-so it can find "Cuarto Oscuro" on one project and something else on another, and it
+so it can find "Server Room" on one project and something else on another, and it
 will not guess an unnamed Ceiling or rename one.
 
 ### Slab ownership, traced from the canonical helpers
@@ -372,7 +372,7 @@ RX 3.54 → crossing (2.0009, 0) inside the Opening (traversal 0, loss 0), RX �
 ## Stage 6.5e: geometry-only Ceiling probe, and rack clearance
 
 **Named vs geometry-only Ceiling.** The named rule stays as it was — it exists so
-"Cuarto Oscuro" is found on S4. A second rule locates a Ceiling by **geometry only**:
+"Server Room" is found on Reference Warehouse. A second rule locates a Ceiling by **geometry only**:
 any area whose canonical `ceilPlan()` yields a usable outer ring is probeable at its
 ring centroid on the receiver plane, named or not. The two are reported separately
 and never merged. An unnamed Ceiling still attenuates RF, so in a physical audit it

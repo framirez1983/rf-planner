@@ -1,6 +1,6 @@
 // Stage 6 browser-runner regression: responsiveness and instrumentation.
 //
-// A real browser run on S4 stalled at "building world and BVH" indefinitely. The
+// A real browser run on Reference Warehouse stalled at "building world and BVH" indefinitely. The
 // world/BVH build was never at fault (Stage 5 measured it at 0-1 ms on this very
 // project). The real cause was scheduling:
 //

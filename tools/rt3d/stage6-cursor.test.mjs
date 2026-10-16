@@ -1,6 +1,6 @@
 // Stage 6 resumable-cursor regression: every canonical cell evaluated EXACTLY once.
 //
-// A real S4 run reported 61 362 cells evaluated for a 156 x 382 = 59 592 grid,
+// A real Reference Warehouse run reported 61 362 cells evaluated for a 156 x 382 = 59 592 grid,
 // with 61 362 x 5 = 306 810 direct paths. Both numbers were internally
 // consistent, which is what made it look like a display typo. It was not.
 //

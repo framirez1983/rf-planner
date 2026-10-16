@@ -2498,7 +2498,7 @@ function labelStrokePx(lb){
 // ---- semantic zoom: 2D AP symbols ----------------------------------------
 // AP symbols are device symbols, not document annotations, so they must NOT
 // scale linearly all the way to invisibility -- but neither may they stay fixed
-// in screen pixels. On a very large plan (e.g. S4Optik) a fixed 46 px azimuth
+// in screen pixels. On a very large plan (e.g. Warehouse A) a fixed 46 px azimuth
 // arc covers a large fraction of a room once zoomed out and buries the exact AP
 // installation point. Each piece therefore scales SUB-linearly with zoom: it
 // shrinks meaningfully when the plan shrinks, but is floored so it never
@@ -8443,7 +8443,7 @@ function rt3dCoverageSlice(world, spec, planeZ, opts){
   // happen after the budget test, so a break left i on the cell that had just
   // been evaluated and the resume counted it again. That is invisible in a total
   // (nothing is skipped) but it inflated `evaluated` and `directTested` by one
-  // cell per yield — on a real S4 run, 59 592 cells became 61 362.
+  // cell per yield — on a real Reference Warehouse run, 59 592 cells became 61 362.
   // So the column is advanced FIRST, then the deadline is consulted.
   if(!alreadyComplete){
   for(; j<spec.rows; j++){
@@ -10573,7 +10573,7 @@ function volumeDepthPrepass(){
 //
 //  WHY THIS SECTION EXISTS
 //  Stage 6 rendered a materially different field from the legacy engine on the
-//  real S4 project. Internal consistency is not evidence of correctness. RF
+//  real Reference Warehouse project. Internal consistency is not evidence of correctness. RF
 //  Planner is used for professional real-world planning, so a divergence has to
 //  be EXPLAINED NUMERICALLY at a specific receiver coordinate before either
 //  engine can be trusted for that purpose.
@@ -10600,7 +10600,7 @@ function volumeDepthPrepass(){
 const RT3D_AUDIT_TRUTH_HIERARCHY = [
   { rank:1, tier:'real measurement / known physical geometry',
     note:'A site survey value at a stated XYZ, or an as-built dimension. '
-       + 'If S4 measurement data becomes available it attaches to the same XYZ '
+       + 'If Reference Warehouse measurement data becomes available it attaches to the same XYZ '
        + 'point through rt3dAuditAttachMeasurement(). No measurement is '
        +'fabricated anywhere in this codebase.' },
   { rank:2, tier:'physically justified model',
@@ -11410,7 +11410,7 @@ function rt3dAuditCorrelate(stats, spec, opts){
 // ------------------------------------------------------------
 //  PROBE SET — RESOLVED BY RULE AGAINST THE LIVE PROJECT
 //
-//  The S4 evidence locations are NOT hardcoded. Hardcoding coordinates would
+//  The Reference Warehouse evidence locations are NOT hardcoded. Hardcoding coordinates would
 //  mean inventing them, and an invented probe is worse than no probe: it looks
 //  like evidence. Instead each probe is a RULE that is resolved against whatever
 //  project is open, and the rule that fired is reported with the result.
@@ -11497,13 +11497,13 @@ function rt3dAuditResolveProbes(opts){
       rule:'same AP; farthest clear-LOS cell at about 8 m',
       apRef:ap0.id, apName:ap0.name, x:far&&far.x, y:far&&far.y, r:far&&far.r,
       resolved:!!far, reason:far?null:'no clear-LOS cell found at about 8 m' });
-    // ---- 9: near a SECOND participating AP (the WH94-001 analogue) ----
+    // ---- 9: near a SECOND participating AP (the AP-001 analogue) ----
     if(sources.length>1){
       const s1=sources[1], ap1=s1.ap;
       const n1=freeCellAtDistance(ap1, 1.5);
       add({ id:'losNearSecondAp', category:'clear LOS, near a second participating AP',
         rule:'second participating AP; nearest clear-LOS cell at about 1.5 m. This is '
-            +'the rule that resolves the "near WH94-001" evidence location on any '
+            +'the rule that resolves the "near AP-001" evidence location on any '
             +'project without hardcoding an AP id.',
         apRef:ap1.id, apName:ap1.name, x:n1&&n1.x, y:n1&&n1.y, r:n1&&n1.r,
         resolved:!!n1, reason:n1?null:'no clear-LOS cell found at about 1.5 m' });
@@ -11575,7 +11575,7 @@ function rt3dAuditResolveProbes(opts){
         resolved:false, reason:'this project has no RF Objects' });
   }
 
-  // ---- 6: the named ceiling area ("Cuarto Oscuro") ----
+  // ---- 6: the named ceiling area ("Server Room") ----
   const ceilings = f.ceilingAreas||[];
   const named = ceilings.filter(c=>c && c.name);
   if(named.length){
@@ -11590,7 +11590,7 @@ function rt3dAuditResolveProbes(opts){
     add({ id:'namedCeiling', category:'under the named Ceiling area',
       rule:'first Ceiling Area that carries a name; centre from its explicit position '
           +'or the centroid of its footprint. Resolved BY NAME so the same rule finds '
-          +'"Cuarto Oscuro" on S4 and something else on another project.',
+          +'"Server Room" on Reference Warehouse and something else on another project.',
       ceilingId:c0.id, ceilingName:c0.name, how:how,
       ceilingAbsZ:+(floorElevation(fi)+Number(c0.height||0)).toFixed(4),
       x:Number.isFinite(cx)?cx:null, y:Number.isFinite(cy)?cy:null,
@@ -12585,7 +12585,7 @@ function rt3dAuditDeltaMapImage(legacyGrid, rt3dGrid, spec, canvas){
 //  WHY THIS EXISTS
 //  The first delta-map implementation gated on the DISPLAYED engine's globals
 //  (heatGridRssi / heatMeta / rt3dExpMeta). That was wrong in three separate
-//  ways, all of which a real browser run on S4/PB exposed at once:
+//  ways, all of which a real browser run on Reference Warehouse/PB exposed at once:
 //
 //  1. It made the audit depend on WHICH ENGINE WAS VISIBLE. Switching the view to
 //     RT3D after a Legacy run removed the Legacy comparison source, so "Legacy
@@ -13035,7 +13035,7 @@ function rt3dAuditCeilingDiagnostics(){
       ? ('this floor has '+(list.length===0
             ? 'no Ceiling Areas at all'
             : rows.length+' Ceiling Area(s), none of which carries a non-empty `name` field')
-         + '. The rule resolves BY NAME so it can find "Cuarto Oscuro" on one project '
+         + '. The rule resolves BY NAME so it can find "Server Room" on one project '
          + 'and something else on another; it will not guess an unnamed Ceiling, and '
          + 'it will not rename one.')
       : null,
@@ -13086,7 +13086,7 @@ function rt3dAuditOpeningDiagnostics(){
 // ------------------------------------------------------------
 //  GEOMETRY-DRIVEN CEILING PROBE
 //
-//  The named-Ceiling rule exists so "Cuarto Oscuro" is found on S4. But this is a
+//  The named-Ceiling rule exists so "Server Room" is found on Reference Warehouse. But this is a
 //  PHYSICAL audit, and a Ceiling that attenuates RF does not become invisible
 //  because nobody typed a label into it. So a second rule locates a Ceiling by
 //  GEOMETRY ONLY: any area whose canonical plan yields a usable ring is a valid
@@ -13498,7 +13498,7 @@ function rt3dAuditReportSliceDiagnostics(){
 // single RF value -- which is exactly what the frozen Stage-7 oracle enforces.
 //
 // It is derived from whatever project is loaded: there is no project name, no
-// hardcoded geometry and no S4 reference anywhere in it. A project with no RT3D
+// hardcoded geometry and no Reference Warehouse reference anywhere in it. A project with no RT3D
 // run yet, or one with no walls at all, produces a correct "not available" note
 // rather than a blank section.
 //

@@ -267,12 +267,12 @@ console.log('Stage 6.5d probe comparison table and model diagnostics\n');
     c.areas[0].ring.cleaned === true, JSON.stringify(c.areas[0].ring));
   check(39, 'a NAMED ceiling area is accepted by the rule',
     (() => {
-      run(ctx, `state.floors[0].ceilingAreas[0].name='Cuarto Oscuro';`);
+      run(ctx, `state.floors[0].ceilingAreas[0].name='Server Room';`);
       const c2 = JSON.parse(run(ctx, 'JSON.stringify(rt3dAuditCeilingDiagnostics())'));
       const ps = JSON.parse(run(ctx, 'JSON.stringify(rt3dAuditResolveProbes({}))'));
       const named = ps.probes.find(p => p.id === 'namedCeiling');
       return c2.withNonEmptyName === 1 && c2.whyUnresolved === null &&
-             named.resolved === true && named.ceilingName === 'Cuarto Oscuro';
+             named.resolved === true && named.ceilingName === 'Server Room';
     })(), 'a named Ceiling Area was still refused');
   check(40, 'the resolver rule is stated on the result, so the choice is auditable',
     /first Ceiling Area that carries a name/.test(c.resolverRule), c.resolverRule);

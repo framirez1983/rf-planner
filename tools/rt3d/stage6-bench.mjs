@@ -59,7 +59,7 @@ function sandbox() {
 }
 
 // A two-floor open-plan office with the ingredients a real project has. This is
-// a STAND-IN, not S4Optik: absolute timings carry the Node vm cross-context
+// a STAND-IN, not Warehouse A: absolute timings carry the Node vm cross-context
 // overhead seen in the earlier benches and exclude rendering. Read them as an
 // order of magnitude; the RATIOS between rows are exact.
 const PROJECT = `
@@ -131,7 +131,7 @@ if (!WITH_STAGE6) {
   console.log(' ~30 min here: 20,825 cells x 8 APs x first-order reflections.)\n');
 } else {
 console.log('Stage 6 — unified coverage field, cost on a realistic project size\n');
-console.log('NOTE: project-like STAND-IN, not S4Optik. Absolute timings carry the Node vm');
+console.log('NOTE: project-like STAND-IN, not Warehouse A. Absolute timings carry the Node vm');
 console.log('cross-context overhead seen in the earlier benches and exclude rendering.');
 console.log('Read them as an order of magnitude; ratios between rows are exact.\n');
 console.log(`scene: ${shape.bodies} bodies (${Object.entries(shape.byFam).map(([k, v]) => `${v} ${k}`).join(', ')})`);

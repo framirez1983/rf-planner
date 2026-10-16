@@ -1,6 +1,6 @@
 // Stage 5 completion-path regression.
 //
-// A browser smoke test on S4 reported: progress reached "tracing 100%: 3420 /
+// A browser smoke test on Reference Warehouse reported: progress reached "tracing 100%: 3420 /
 // 3420 rays" and then STAYED there. No summary, no grid, blank map.
 //
 // These tests pin the invariant that was violated:

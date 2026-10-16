@@ -6,7 +6,7 @@
 // lifetime, fan reuse, cell mapping, the no-interpolation rule, the
 // aggregation rule, colour reuse, and that nothing can reach the project file.
 //
-// Manual browser acceptance against S4 is a separate, human step.
+// Manual browser acceptance against Reference Warehouse is a separate, human step.
 import { makeDom, run } from './loader.mjs';
 import vm from 'node:vm';
 import fs from 'node:fs';
@@ -383,18 +383,25 @@ console.log('Stage 5 acceptance — RT3D experimental browser layer\n');
 {
   const paint = script.slice(script.indexOf('function rt3dExpPaint('),
                              script.indexOf('function rt3dExpRun('));
-  const usesAppScale = /rssiColor\(v\)/.test(paint);
+  const usesAppScale = /rssiColor\(v\)/.test(paint) || /,\s*rssiColor\)/.test(paint);
   const noSecondScale = !/stops\s*=|sinrColor/.test(paint);
-  const directLoop = /for\(let k=0;k<W\*H;k\+\+\)/.test(paint);
+  // Stage 10D (accepted): painting interpolates exact scalars bilinearly and
+  // then colors them with the app scale -- still rssiColor, still no second
+  // scale, still never paintHeat. The old 1:1 loop is intentionally gone; the
+  // interpolation lives in rt3dPaintSmooth, called with rssiColor.
+  const smoothSeg = script.slice(script.indexOf('function rt3dPaintSmooth('),
+                                 script.indexOf('function rt3dExpPaint('));
+  const scalarFirst = /rt3dPaintSmooth\(/.test(paint) &&
+    /rt3dBilinearSample/.test(smoothSeg) && /colorFn\(v\)/.test(smoothSeg);
   // it must NOT reuse paintHeat (which would apply the smoothing preference)
   const notPaintHeat = !/paintHeat\(/.test(paint);
   const hookOff = /ctx\.imageSmoothingEnabled=false;/.test(
     script.slice(script.indexOf('// RT3D experimental underlay'), script.indexOf('// no-AP zones')));
   check(13, 'the existing RSSI colour scale is reused and no second scale is invented',
     usesAppScale && noSecondScale, `usesAppScale=${usesAppScale} noSecondScale=${noSecondScale}`);
-  check('13b', 'RT3D paints per cell directly, never through the smoothing-aware heat painter',
-    directLoop && notPaintHeat && hookOff,
-    `direct=${directLoop} notPaintHeat=${notPaintHeat} smoothingOff=${hookOff}`);
+  check('13b', 'RT3D paints interpolated scalars through the app colour scale, never through the smoothing-aware heat painter',
+    scalarFirst && notPaintHeat && hookOff,
+    `scalarFirst=${scalarFirst} notPaintHeat=${notPaintHeat} smoothingOff=${hookOff}`);
 }
 
 // ------------------------------------------------------------------ 14
