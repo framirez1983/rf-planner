@@ -7,6 +7,8 @@ Simulator by nevva.
 
 ### Added
 
+- Native `.rfplan` project extension: projects save as `.rfplan`, remain JSON
+  internally, and legacy `.json` project files keep opening.
 - True 3D RF field (`Coverage(x,y,z)`): strongest valid path per AP
   (direct plus first-order wall reflections), strongest AP serves, no dBm
   summation, full-3D antenna gain with elevation and downtilt.
@@ -28,6 +30,9 @@ Simulator by nevva.
 
 ### Changed
 
+- 3D right-drag now pans the horizontal project plane in both directions
+  (up/down = forward/back relative to the current view); it no longer changes
+  target height, camera distance, azimuth or elevation.
 - Legacy instant engine kept only as the fast design preview; the
   authoritative model is the sole simulation result.
 - Internal engine controls (legacy Ray tracing, per-engine buttons,

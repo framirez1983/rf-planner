@@ -328,7 +328,7 @@
       <button id="btnPlanPng" data-i18n="export.floorPlan">Plano</button>
       <button id="btnGltf" data-i18n="toolbar.scene">3D-scen</button>
     </div>
-    <input type="file" id="fileLoad" accept=".json,application/json">
+    <input type="file" id="fileLoad" accept=".rfplan,.json,application/json">
   </div>
 
   <!-- BODY -->
@@ -925,7 +925,7 @@ const translations = {
     "auto.progress": "Calculando colocación…",
     "auto.noImprovement": "No se encontró ninguna mejora.",
     "wall.noCleanup": "No hay paredes que unir.",
-    "project.saved": "Proyecto guardado (JSON).",
+    "project.saved": "Proyecto guardado.",
     "project.opened": "Proyecto abierto.",
     "error.invalidFile": "Archivo no válido",
     "error.noHeatExport": "No hay un mapa de cobertura que exportar. Calcula primero la cobertura.",
@@ -1393,7 +1393,7 @@ const translations = {
     "auto.progress": "Calculating placement…",
     "auto.noImprovement": "No improvement found.",
     "wall.noCleanup": "No walls to clean up.",
-    "project.saved": "Project saved (JSON).",
+    "project.saved": "Project saved.",
     "project.opened": "Project opened.",
     "error.invalidFile": "Invalid file",
     "error.noHeatExport": "No coverage map to export — calculate coverage first.",
@@ -1861,7 +1861,7 @@ const translations = {
     "auto.progress": "Beräknar placering…",
     "auto.noImprovement": "Ingen förbättring hittades.",
     "wall.noCleanup": "Inga väggar att städa.",
-    "project.saved": "Projekt sparat (JSON).",
+    "project.saved": "Projekt sparat.",
     "project.opened": "Projekt öppnat.",
     "error.invalidFile": "Ogiltig fil",
     "error.noHeatExport": "Ingen täckningskarta att exportera — beräkna täckning först.",
@@ -14402,7 +14402,12 @@ function setupOrbit(dom){
   window.addEventListener('pointermove',e=>{
     if(!mode)return; const dx=e.clientX-last.x,dy=e.clientY-last.y; last={x:e.clientX,y:e.clientY};
     if(mode==='orbit'){ o.az-=dx*0.006; o.el=clamp(o.el-dy*0.006,0.06,1.5); }
-    else { const s=o.r*0.0016; o.tx+=(-Math.cos(o.az))*dx*s; o.tz+=(Math.sin(o.az))*dx*s; o.ty+=dy*s; }
+    else { const s=o.r*0.0016; o.tx+=(-Math.cos(o.az))*dx*s; o.tz+=(Math.sin(o.az))*dx*s;
+      // right-drag pans the horizontal XZ plane only: mouse horizontal moves
+      // camera-right on XZ, mouse vertical moves camera forward/back on XZ.
+      // ty, r, az and el are never touched by panning. The az-based basis is
+      // unit-length at every elevation, so near-top-down views stay robust.
+      o.tx+=Math.sin(o.az)*dy*s; o.tz+=(Math.cos(o.az))*dy*s; }
   });
   window.addEventListener('pointerup',()=>{mode=null;});
   dom.addEventListener('wheel',e=>{e.preventDefault();o.r=clamp(o.r*Math.exp(e.deltaY*0.0012),5,160);},{passive:false});
@@ -18076,7 +18081,7 @@ function serialize(){
 }
 function saveProject(){
   const data=JSON.stringify(serialize(),null,2);
-  download(new Blob([data],{type:'application/json'}), 'rf-projekt.json');
+  download(new Blob([data],{type:'application/json'}), 'RF Planner.rfplan');
   showToast(true,uiMessage('project.saved'),null,1600);
 }
 function loadProject(file){

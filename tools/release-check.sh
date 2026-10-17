@@ -20,14 +20,14 @@ echo "[2/4] Product tests (workflow, volume, cloud, UX)"
 for t in stage8a-integration stage8b-freshness stage9a-tomography \
   stage9b-cloud stage9c-multifloor stage9d-fog stage9e-bgclip \
   stage10a-unified stage10b-project stage10c-intensity stage10d-smoothing \
-  slab-thickness; do
+  slab-thickness stage11-release-ux; do
   echo "  -- $t"
-  node "tools/rt3d/$t.test.mjs" > /tmp/opencode/release-check-last.log 2>&1 \
-    || { echo "FAILED: $t"; tail -20 /tmp/opencode/release-check-last.log; exit 1; }
+  node "tools/rt3d/$t.test.mjs" > /tmp/release-check-last.log 2>&1 \
+    || { echo "FAILED: $t"; tail -20 /tmp/release-check-last.log; exit 1; }
 done
 echo "  -- smoke"
-node tools/rt3d/smoke.mjs > /tmp/opencode/release-check-last.log 2>&1 \
-  || { echo "FAILED: smoke"; tail -20 /tmp/opencode/release-check-last.log; exit 1; }
+node tools/rt3d/smoke.mjs > /tmp/release-check-last.log 2>&1 \
+  || { echo "FAILED: smoke"; tail -20 /tmp/release-check-last.log; exit 1; }
 echo "      product suites green"
 
 echo "[3/4] Docker build"

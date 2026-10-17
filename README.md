@@ -31,8 +31,9 @@ because they sample the same field.
   intensity; tomography-sheet fallback when WebGL2 is unavailable.
 - Floor footprints: upper-floor plans clip to the real slab outline while
   Planta Baja stays the permanent site reference underneath.
-- Project save/load as user-managed JSON; PNG exports (RF, RF+plan, plan)
-  and glTF scene export.
+- Project save/load as `.rfplan` — RF Planner's native project extension;
+  files stay JSON internally and legacy `.json` projects still open. PNG
+  exports (RF, RF+plan, plan) and glTF scene export.
 - UI in Spanish, English and Swedish. No backend, no database, no accounts.
 
 ## Core workflow
@@ -128,7 +129,9 @@ Logs: `docker logs rf-planner`.
 
 ## Project save/load and exports
 
-- Projects are user-managed JSON files (save downloads, load opens).
+- Projects are user-managed `.rfplan` files (JSON internally): save downloads
+  `<name>.rfplan`, and Load opens `.rfplan` and legacy `.json` projects alike.
+  Validity is judged by project content, never by filename extension alone.
 - Editor preferences (language, grid, smoothing) live in `localStorage`;
   simulation results are never persisted.
 - Exports: PNG coverage map, PNG coverage + plan, PNG floor plan, and a
