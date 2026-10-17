@@ -99,7 +99,7 @@ Requirements: Docker with the Compose plugin, and outbound internet at
 runtime for the 3D library (see below).
 
 ```bash
-git clone <public-rf-planner-url-placeholder>
+git clone https://github.com/framirez1983/rf-planner
 cd rf-planner
 docker compose up -d --build
 ```
