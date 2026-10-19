@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.0.0-rc.1 — Unreleased
+## v1.0.0-rc.1 — 2026-10-19
 
 First public release candidate of RF Planner, forked from WiFi Coverage
 Simulator by nevva.
