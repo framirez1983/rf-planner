@@ -3,10 +3,6 @@
 RF Planner is an open-source Wi-Fi planning tool with fast design preview
 and authoritative 2D/3D RF simulation for multi-floor projects.
 
-> **Screenshots wanted.** This section should show the 2D plan with
-> authoritative coverage and the 3D volumetric cloud on a real project
-> (`docs/screenshot-2d.png`, `docs/screenshot-3d.png`).
-
 ## Why RF Planner
 
 RF Planner is a fork of [WiFi Coverage Simulator by nevva](https://github.com/nevva/wifi-simulator),
