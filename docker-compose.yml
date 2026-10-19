@@ -1,9 +1,9 @@
 services:
-  wifi-simulator:
+  rf-planner:
     build: .
-    image: wifi-simulator:latest
-    container_name: wifi-simulator
+    image: rf-planner:latest
+    container_name: rf-planner
     ports:
-      # host:container — ändra 8080 om porten är upptagen
+      # host:container — change 8080 if the port is taken
       - "8080:80"
     restart: unless-stopped
